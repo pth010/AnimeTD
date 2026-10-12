@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: a win now pays 375 Gold + 75 Gems and shows a reward
---  popup, see CurrencyUI)
+-- (replaces the earlier version: matches end on a 30-second results screen with a damage
+--  summary, where the team can Play Again or return to the lobby, see ResultsUI)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -38,6 +38,7 @@ local WAVE_GEMS = 20        -- gems for every player when a wave is cleared (set
 local WIN_GEMS = 75         -- gems for every player when the team wins the match
 local WIN_GOLD = 375        -- gold for every player when the team wins the match
 local BOSS_EVERY = 5        -- a boss ends every 5th wave
+local RESULTS_TIME = 30     -- seconds on the victory/defeat screen before going back to the lobby
 
 local UPGRADE_MAX_LEVEL = 5
 local UPGRADE_COST_MULT = 0.75 -- upgrade cost = unit cost * this * current level
@@ -111,6 +112,8 @@ local function createArena(id)
 		Running = false,
 		Countdown = nil,
 		Clock = 0,         -- match time, runs faster at higher speeds (unit cooldowns use it)
+		Stats = {},        -- [userId] = { Name, Damage, Kills, Gems } for the results screen
+		Votes = {},        -- [player] = "Again" on the results screen
 		Attrs = { BaseHealth = BASE_HEALTH, Wave = 0, MaxWave = MAX_WAVE, MatchStatus = "In lobby", MatchSpeed = 1 },
 	}
 end
@@ -241,11 +244,25 @@ local function spawnEnemy(arena, wave, typeName)
 	})
 end
 
-local function damageEnemy(enemy, amount, owner)
+-- Per-player numbers for the results screen (kept even if the player leaves mid-match)
+local function statsFor(arena, player)
+	local s = arena.Stats[player.UserId]
+	if not s then
+		s = { Name = player.DisplayName, UserId = player.UserId, Damage = 0, Kills = 0, Gems = 0 }
+		arena.Stats[player.UserId] = s
+	end
+	return s
+end
+
+local function damageEnemy(arena, enemy, amount, owner)
 	if enemy.Dead then return end
+	local dealt = math.min(amount, enemy.Health) -- overkill doesn't count
 	enemy.Health -= amount
+	local stats = statsFor(arena, owner)
+	stats.Damage += dealt
 	if enemy.Health <= 0 then
 		enemy.Dead = true
+		stats.Kills += 1
 		addCash(owner, enemy.Reward)
 		enemy.Part:Destroy()
 	else
@@ -316,7 +333,7 @@ local function stepArena(arena, dt)
 					u.Model:PivotTo(CFrame.lookAt(pivot.Position, look))
 				end
 				drawBeam(arena, u.Part.Position, best.Part.Position, u.Part.Color)
-				damageEnemy(best, u.Stats.Damage, u.Owner)
+				damageEnemy(arena, best, u.Stats.Damage, u.Owner)
 			end
 		end
 	end
@@ -410,6 +427,16 @@ local rewardEvent = Instance.new("RemoteEvent")
 rewardEvent.Name = "RewardEvent"
 rewardEvent.Parent = ReplicatedStorage
 
+-- Server -> client: show (or hide) the results screen. Client -> server: "Again" or "Menu"
+local resultsEvent = Instance.new("RemoteEvent")
+resultsEvent.Name = "ResultsEvent"
+resultsEvent.Parent = ReplicatedStorage
+
+-- No building or upgrading once the match has been decided
+local function matchDecided(arena)
+	return arena.State == "Over" or arena.State == "Results"
+end
+
 placeRemote.OnServerInvoke = function(player, unitName, position)
 	if typeof(unitName) ~= "string" or typeof(position) ~= "Vector3" then
 		return { Success = false, Error = "Bad request." }
@@ -422,7 +449,7 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 	if not arena then
 		return { Success = false, Error = "You're not in a match." }
 	end
-	if arena.State == "Over" then
+	if matchDecided(arena) then
 		return { Success = false, Error = "Match is over." }
 	end
 
@@ -519,7 +546,7 @@ actionRemote.OnServerInvoke = function(player, action, part)
 	if not arena then
 		return { Success = false, Error = "You're not in a match." }
 	end
-	if arena.State == "Over" then
+	if matchDecided(arena) then
 		return { Success = false, Error = "Match is over." }
 	end
 
@@ -627,6 +654,7 @@ Players.PlayerRemoving:Connect(function(player)
 	playerArena[player] = nil
 	if arena then
 		arena.Players[player] = nil
+		arena.Votes[player] = nil
 		for i = #arena.Units, 1, -1 do
 			if arena.Units[i].Owner == player then
 				arena.Units[i].Part:Destroy()
@@ -648,25 +676,36 @@ local function clearBoard(arena)
 	setMatchAttr(arena, "MatchSpeed", 1)
 end
 
--- Sends the team back to the lobby and resets the arena
+-- Takes one player out of the arena and back to the lobby
+local function sendToLobby(arena, p)
+	arena.Players[p] = nil
+	arena.Votes[p] = nil
+	playerArena[p] = nil
+	p:SetAttribute("InMatch", false)
+	p:SetAttribute("ArenaId", nil)
+	teleportTo(p, lobbySpawn, 8)
+end
+
+-- Sends the whole team back to the lobby and resets the arena
 local function endMatch(arena)
 	for p in pairs(arena.Players) do
-		playerArena[p] = nil
-		p:SetAttribute("InMatch", false)
-		p:SetAttribute("ArenaId", nil)
-		teleportTo(p, lobbySpawn, 8)
+		sendToLobby(arena, p)
 	end
 	table.clear(arena.Players)
+	table.clear(arena.Votes)
 	clearBoard(arena)
 	arena.State = "Waiting"
 	arena.Attrs.MatchStatus = "In lobby"
 end
 
-local function runMatch(arena, participants)
+-- Plays one match from wave 1. Returns true (won), false (base destroyed) or nil (everyone left).
+local function playMatch(arena, participants)
 	clearBoard(arena)
+	table.clear(arena.Stats)
 	for _, p in ipairs(participants) do
 		arena.Players[p] = true
 		playerArena[p] = arena
+		statsFor(arena, p)
 		for name, value in pairs(arena.Attrs) do
 			p:SetAttribute(name, value)
 		end
@@ -683,10 +722,7 @@ local function runMatch(arena, participants)
 		for t = INTERMISSION, 1, -1 do
 			setMatchAttr(arena, "MatchStatus", string.format("Wave %d%s starts in %d", wave, isBoss and " (BOSS)" or "", t))
 			task.wait(1 / speedOf(arena))
-			if not participantsLeft(arena) then
-				endMatch(arena)
-				return
-			end
+			if not participantsLeft(arena) then return nil end
 		end
 
 		setMatchAttr(arena, "Wave", wave)
@@ -702,31 +738,108 @@ local function runMatch(arena, participants)
 			task.wait(0.25)
 		end
 
-		if not participantsLeft(arena) then
-			endMatch(arena)
-			return
-		end
-
-		if arena.State ~= "Playing" then
-			setMatchAttr(arena, "MatchStatus", "Base destroyed! Returning to lobby...")
-			task.wait(6)
-			endMatch(arena)
-			return
-		end
+		if not participantsLeft(arena) then return nil end
+		if arena.State ~= "Playing" then return false end -- base destroyed
 
 		for p in pairs(arena.Players) do
 			PlayerData.AddGems(p, WAVE_GEMS)
+			statsFor(arena, p).Gems += WAVE_GEMS
 		end
 	end
 
 	arena.State = "Over"
-	setMatchAttr(arena, "MatchStatus", "Victory!")
 	for p in pairs(arena.Players) do
 		PlayerData.AddGold(p, WIN_GOLD)
 		PlayerData.AddGems(p, WIN_GEMS)
-		rewardEvent:FireClient(p, { Title = "VICTORY!", Gold = WIN_GOLD, Gems = WIN_GEMS })
+		statsFor(arena, p).Gems += WIN_GEMS
 	end
-	task.wait(8)
+	return true
+end
+
+-- The victory/defeat screen. Waits up to RESULTS_TIME for everyone to choose, then
+-- returns the players who picked Play Again (everyone else goes back to the lobby).
+local function showResults(arena, victory)
+	arena.State = "Results"
+	table.clear(arena.Votes)
+	setMatchAttr(arena, "MatchStatus", victory and "Victory!" or "Defeat!")
+	setMatchAttr(arena, "ResultsReady", 0)
+
+	local rows = {}
+	local totalDamage = 0
+	for _, s in pairs(arena.Stats) do
+		table.insert(rows, { Name = s.Name, UserId = s.UserId, Damage = math.floor(s.Damage), Kills = s.Kills })
+		totalDamage += s.Damage
+	end
+	table.sort(rows, function(a, b) return a.Damage > b.Damage end)
+
+	local teamCount = 0
+	for _ in pairs(arena.Players) do teamCount += 1 end
+
+	for p in pairs(arena.Players) do
+		local mine = statsFor(arena, p)
+		resultsEvent:FireClient(p, {
+			Victory = victory,
+			Wave = arena.Attrs.Wave,
+			MaxWave = MAX_WAVE,
+			Gold = victory and WIN_GOLD or 0,
+			Gems = mine.Gems,
+			TotalDamage = math.floor(totalDamage),
+			Players = rows,
+			TeamCount = teamCount,
+			Time = RESULTS_TIME,
+		})
+	end
+
+	local deadline = os.clock() + RESULTS_TIME
+	while os.clock() < deadline and participantsLeft(arena) do
+		local everyoneReady = true
+		for p in pairs(arena.Players) do
+			if arena.Votes[p] ~= "Again" then
+				everyoneReady = false
+				break
+			end
+		end
+		if everyoneReady then break end
+		task.wait(0.25)
+	end
+
+	local again = {}
+	for p in pairs(arena.Players) do
+		if arena.Votes[p] == "Again" then
+			table.insert(again, p)
+		else
+			sendToLobby(arena, p)
+		end
+	end
+	for _, p in ipairs(again) do
+		resultsEvent:FireClient(p, { Hide = true })
+	end
+	return again
+end
+
+-- Players answer the results screen
+resultsEvent.OnServerEvent:Connect(function(player, choice)
+	local arena = playerArena[player]
+	if not arena or arena.State ~= "Results" then return end
+	if choice == "Again" then
+		arena.Votes[player] = "Again"
+	elseif choice == "Menu" then
+		sendToLobby(arena, player)
+	else
+		return
+	end
+	local ready = 0
+	for _ in pairs(arena.Votes) do ready += 1 end
+	setMatchAttr(arena, "ResultsReady", ready)
+end)
+
+-- Runs matches back to back for as long as the team keeps choosing Play Again
+local function runMatch(arena, participants)
+	while #participants > 0 do
+		local victory = playMatch(arena, participants)
+		if victory == nil then break end -- everyone left
+		participants = showResults(arena, victory)
+	end
 	endMatch(arena)
 end
 
