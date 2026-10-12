@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: adds cash units (UnitData.Farms) - they don't attack, have
---  their own upgrade prices, and pay their owner after every cleared wave)
+-- (replaces the earlier version: cash units' name tags no longer show their per-wave income;
+--  it's still in the upgrade panel)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -482,10 +482,8 @@ local function refreshUnit(u)
 		part:SetAttribute("IsFarm", true)
 		part:SetAttribute("Income", u.Farm.Income[u.Level])
 		part:SetAttribute("NextIncome", u.Farm.Income[u.Level + 1] or 0)
-		u.Label.Text = string.format("%s Lv%d ($%d/wave)", part.Name, u.Level, u.Farm.Income[u.Level])
-	else
-		u.Label.Text = string.format("%s Lv%d%s", part.Name, u.Level, u.HighGround and " (High)" or "")
 	end
+	u.Label.Text = string.format("%s Lv%d%s", part.Name, u.Level, u.HighGround and " (High)" or "")
 end
 
 -- Cash units pay out when a wave is cleared, with a "+$250" popping up over each one
