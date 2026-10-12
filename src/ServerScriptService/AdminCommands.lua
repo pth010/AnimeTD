@@ -1,71 +1,141 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: AdminCommands
--- Tester chat commands for giving yourself money. Type these in the chat box:
---   !gems 5000      add 5000 gems (summon currency, saved)
---   !setgems 5000   set your gems to exactly 5000
---   !cash 5000      add 5000 in-match cash (only matters during a match)
---   !setcash 5000   set your in-match cash to exactly 5000
---   !resetpity      set your summon pity back to 0
--- Negative numbers work too (e.g. "!gems -500").
+-- Tester chat commands. Type these in the in-game chat box (not the Studio command bar):
+--   !gems 5000              add 5000 gems (summon currency, saved)
+--   !setgems 5000           set your gems to exactly 5000
+--   !cash 5000              add 5000 in-match cash (only matters during a match)
+--   !setcash 5000           set your in-match cash to exactly 5000
+--   !resetpity              set your summon pity back to 0
+--   !unit Starfall Kitsune  give yourself one copy of a unit
+--   !unit frost mage 3      give yourself 3 copies (names aren't case-sensitive,
+--                           and the start of a name is enough: "!unit starfall")
+-- Negative numbers work for gems and cash (e.g. "!gems -500").
+-- Results and mistakes are printed in the Output window.
 --
 -- Who can use them: everyone while testing in Studio, and in the live game only the
 -- UserIds listed in ADMINS below. Find your UserId in the URL of your Roblox profile page.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
 
 local ADMINS = {
-	-- [123456789] = true, -- put your UserId here to use the commands in the live game
+	[554749540] = true,
 }
+
+local MAX_UNIT_COPIES = 100 -- most copies one !unit command can give
 
 local function isAdmin(player)
 	return RunService:IsStudio() or ADMINS[player.UserId] == true
 end
 
+-- Finds a unit by name: an exact match first (any capitalisation), then a name that
+-- starts with what was typed. Returns the unit name, or nil and a reason.
+local function findUnit(typed)
+	typed = string.lower(typed)
+	if typed == "" then
+		return nil, "type a unit name"
+	end
+
+	local matches = {}
+	for unitName in pairs(UnitData.UnitRarity) do
+		local lower = string.lower(unitName)
+		if lower == typed then
+			return unitName
+		end
+		if string.sub(lower, 1, #typed) == typed then
+			table.insert(matches, unitName)
+		end
+	end
+
+	if #matches == 1 then
+		return matches[1]
+	elseif #matches > 1 then
+		table.sort(matches)
+		return nil, "more than one unit matches: " .. table.concat(matches, ", ")
+	end
+	return nil, "no unit called '" .. typed .. "'"
+end
+
+local function readNumber(args)
+	local n = tonumber(args)
+	return n and math.floor(n)
+end
+
+-- Each command gets the player and everything typed after the command name.
+-- It returns nil on success, or a message explaining what went wrong.
 local commands = {}
 
-function commands.gems(player, amount)
+function commands.gems(player, args)
+	local amount = readNumber(args)
+	if not amount then return "usage: !gems <number>" end
 	PlayerData.AddGems(player, amount)
 end
 
-function commands.setgems(player, amount)
+function commands.setgems(player, args)
+	local amount = readNumber(args)
+	if not amount then return "usage: !setgems <number>" end
 	local profile = PlayerData.Get(player)
-	if profile then
-		PlayerData.AddGems(player, amount - profile.Gems)
-	end
+	if not profile then return "your data is still loading" end
+	PlayerData.AddGems(player, amount - profile.Gems)
 end
 
-function commands.cash(player, amount)
+function commands.cash(player, args)
+	local amount = readNumber(args)
+	if not amount then return "usage: !cash <number>" end
 	player:SetAttribute("Cash", (player:GetAttribute("Cash") or 0) + amount)
 end
 
-function commands.setcash(player, amount)
+function commands.setcash(player, args)
+	local amount = readNumber(args)
+	if not amount then return "usage: !setcash <number>" end
 	player:SetAttribute("Cash", amount)
 end
 
 function commands.resetpity(player)
 	local profile = PlayerData.Get(player)
-	if profile then
-		profile.Pity = 0
-		PlayerData.Refresh(player)
+	if not profile then return "your data is still loading" end
+	profile.Pity = 0
+	PlayerData.Refresh(player)
+end
+
+function commands.unit(player, args)
+	-- A number at the end is how many copies: "!unit frost mage 3"
+	local namePart, countPart = string.match(args, "^(.-)%s+(%d+)$")
+	local count = 1
+	if namePart then
+		count = math.clamp(tonumber(countPart), 1, MAX_UNIT_COPIES)
+	else
+		namePart = args
 	end
+
+	local unitName, problem = findUnit(namePart)
+	if not unitName then return problem end
+	local profile = PlayerData.Get(player)
+	if not profile then return "your data is still loading" end
+
+	-- Added directly (not through PlayerData.AddUnit) so auto-delete can't eat it
+	profile.Obtained[unitName] = (profile.Obtained[unitName] or 0) + count
+	profile.Units[unitName] = (profile.Units[unitName] or 0) + count
+	PlayerData.Refresh(player)
+	print(string.format("[AdminCommands] gave %s %d x %s", player.Name, count, unitName))
 end
 
 local function onChatted(player, message)
-	local name, arg = string.match(message, "^!(%a+)%s*(%S*)")
+	local name, args = string.match(message, "^!(%a+)%s*(.-)%s*$")
 	local command = name and commands[string.lower(name)]
 	if not command or not isAdmin(player) then return end
 
-	local amount = tonumber(arg)
-	if name:lower() ~= "resetpity" and not amount then
-		warn("[AdminCommands] usage: !" .. name .. " <number>")
-		return
+	local problem = command(player, args)
+	if problem then
+		warn(string.format("[AdminCommands] !%s: %s", name, problem))
+	else
+		print(string.format("[AdminCommands] %s ran !%s %s", player.Name, name, args))
 	end
-	command(player, amount and math.floor(amount))
-	print(string.format("[AdminCommands] %s ran !%s %s", player.Name, name, arg))
 end
 
 local function onPlayerAdded(player)
