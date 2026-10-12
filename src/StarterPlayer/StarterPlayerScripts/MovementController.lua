@@ -1,12 +1,14 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: MovementController
--- Sprint and dash on Q (works in the lobby and in matches):
---   * press Q   -> a quick dash in the direction you're moving (or facing, if standing still)
---   * hold Q    -> keep sprinting until you let go
+-- Sprint and dash (works in the lobby and in matches):
+--   * hold Shift -> sprint until you let go
+--   * press Q    -> a quick dash in the direction you're moving (or facing, if standing still)
+--   * hold Q     -> keep sprinting after the dash until you let go
 -- In a match, Q still cancels placement / closes the upgrade panel first (see PlacementUI);
 -- that press won't dash.
 -- On touch devices a DASH button appears on the right side of the screen.
+-- Shift Lock also uses Shift: turn it off with StarterPlayer > EnableMouseLockOption = false.
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -14,23 +16,38 @@ local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 
 -- ===== CONFIG (tweak freely) =====
-local SPRINT_SPEED = 26     -- walk speed while Q is held (default Roblox walk speed is 16)
+local SPRINT_SPEED = 26     -- walk speed while sprinting (default Roblox walk speed is 16)
 local DASH_SPEED = 75       -- studs per second during the dash
 local DASH_TIME = 0.18      -- seconds the dash lasts (~13 studs)
 local DASH_COOLDOWN = 1.5   -- seconds between dashes
-local KEY = Enum.KeyCode.Q
+local DASH_KEY = Enum.KeyCode.Q
+local SPRINT_KEYS = { Enum.KeyCode.LeftShift, Enum.KeyCode.RightShift }
 
 local humanoid, rootPart
 local normalSpeed = 16
-local sprinting = false
-local keyHeld = false
 local lastDash = -math.huge
+
+-- Anything that is currently asking to sprint: Shift, Q, or the touch button.
+-- You sprint while at least one of them is held.
+local sprintSources = {}
+local dashKeyHeld = false
+
+local function updateSprint()
+	if humanoid then
+		humanoid.WalkSpeed = next(sprintSources) and SPRINT_SPEED or normalSpeed
+	end
+end
+
+local function setSprintSource(source, on)
+	sprintSources[source] = on or nil
+	updateSprint()
+end
 
 local function onCharacterAdded(char)
 	humanoid = char:WaitForChild("Humanoid")
 	rootPart = char:WaitForChild("HumanoidRootPart")
 	normalSpeed = humanoid.WalkSpeed
-	sprinting = false
+	updateSprint() -- still holding Shift while respawning keeps you sprinting
 end
 if player.Character then
 	task.spawn(onCharacterAdded, player.Character)
@@ -40,13 +57,6 @@ player.CharacterAdded:Connect(onCharacterAdded)
 local function canMove()
 	return humanoid and rootPart and rootPart.Parent and humanoid.Health > 0
 		and humanoid:GetState() ~= Enum.HumanoidStateType.Seated
-end
-
-local function setSprint(on)
-	sprinting = on
-	if humanoid then
-		humanoid.WalkSpeed = on and SPRINT_SPEED or normalSpeed
-	end
 end
 
 local function dash()
@@ -79,33 +89,40 @@ local function dash()
 	end)
 end
 
-local function press()
+local function pressDashKey()
 	-- Wait a frame so PlacementUI can claim this press first (it uses Q to cancel)
 	task.wait()
 	if os.clock() - (player:GetAttribute("QConsumedAt") or -math.huge) < 0.2 then return end
 	dash()
-	if keyHeld then -- don't get stuck sprinting if Q was already let go
-		setSprint(true)
-	end
-end
-
-local function release()
-	if sprinting then
-		setSprint(false)
+	if dashKeyHeld then -- don't get stuck sprinting if Q was already let go
+		setSprintSource("Q", true)
 	end
 end
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed or input.KeyCode ~= KEY then return end
-	keyHeld = true
-	press()
+	if gameProcessed then return end -- e.g. typing in chat
+	if input.KeyCode == DASH_KEY then
+		dashKeyHeld = true
+		pressDashKey()
+	elseif table.find(SPRINT_KEYS, input.KeyCode) then
+		setSprintSource(input.KeyCode, true)
+	end
 end)
 
 UserInputService.InputEnded:Connect(function(input)
-	if input.KeyCode == KEY then
-		keyHeld = false
-		release()
+	if input.KeyCode == DASH_KEY then
+		dashKeyHeld = false
+		setSprintSource("Q", false)
+	elseif table.find(SPRINT_KEYS, input.KeyCode) then
+		setSprintSource(input.KeyCode, false)
 	end
+end)
+
+-- Clicking away from the game window can swallow the key release, so stop sprinting then
+UserInputService.WindowFocusReleased:Connect(function()
+	dashKeyHeld = false
+	table.clear(sprintSources)
+	updateSprint()
 end)
 
 -- ===== Touch button =====
@@ -130,12 +147,12 @@ if UserInputService.TouchEnabled then
 	button.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.Touch then
 			dash()
-			setSprint(true)
+			setSprintSource("Touch", true)
 		end
 	end)
 	button.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.Touch then
-			release()
+			setSprintSource("Touch", false)
 		end
 	end)
 end
