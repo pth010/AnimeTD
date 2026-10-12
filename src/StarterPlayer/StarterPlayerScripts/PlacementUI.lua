@@ -5,7 +5,7 @@
 -- HUD (wave, base HP, cash), unit hotbar, click-to-place with a range preview.
 -- Controls: click a unit in the hotbar, then click a green plot to place it.
 -- Click a placed unit (with nothing selected) to upgrade or sell it.
--- Q or right-click cancels / closes.
+-- Q or right-click cancels / closes. (When nothing is open, Q is sprint/dash: see MovementController.)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -257,6 +257,10 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
 
 	if input.KeyCode == Enum.KeyCode.Q or input.UserInputType == Enum.UserInputType.MouseButton2 then
+		-- Tell MovementController this Q press was a cancel, not a dash
+		if input.KeyCode == Enum.KeyCode.Q and (selected or inspected) then
+			player:SetAttribute("QConsumedAt", os.clock())
+		end
 		selectUnit(nil)
 		closePanel()
 		return
