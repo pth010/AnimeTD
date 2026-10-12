@@ -1,7 +1,8 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: UnitData
--- (replaces the earlier version: adds combat stats and helper lookups)
+-- (replaces the earlier version: adds the limited Starfall Festival event and its
+--  featured Mythic unit, Starfall Kitsune)
 
 local UnitData = {}
 
@@ -20,7 +21,7 @@ UnitData.Units = {
 	Rare      = { "Storm Lancer", "Frost Mage", "Iron Guard" },
 	Epic      = { "Shadow Dancer", "Flame Ronin", "Moon Priestess" },
 	Legendary = { "Dragon Knight", "Celestial Sage" },
-	Mythic    = { "Eclipse Emperor" },
+	Mythic    = { "Eclipse Emperor", "Starfall Kitsune" }, -- Starfall Kitsune: event only (see UnitData.Event)
 }
 
 -- Combat stats per rarity (override per unit in UnitData.StatOverrides if you want)
@@ -34,7 +35,28 @@ UnitData.RarityStats = {
 }
 
 -- Example: UnitData.StatOverrides["Ember Archer"] = { Range = 22 }
-UnitData.StatOverrides = {}
+UnitData.StatOverrides = {
+	-- The event unit is a cut above the regular Mythic
+	["Starfall Kitsune"] = { Damage = 380, Range = 26, Cooldown = 0.55, Cost = 1800 },
+}
+
+-- ===== LIMITED EVENT BANNER =====
+-- While the event is active, every Mythic you pull has a RateUp chance of being the
+-- featured unit. When it ends, the featured unit can't be summoned any more
+-- (players who got one keep it).
+UnitData.Event = {
+	Enabled = true,
+	Name = "Starfall Festival",
+	Featured = "Starfall Kitsune",
+	Tagline = "A nine-tailed fox spirit born from a falling star.",
+	RateUp = 0.75,        -- 75% of Mythic pulls are the featured unit
+	EndsAt = 1792972800,  -- Unix time (UTC) the event ends: 26 Oct 2026 00:00. nil = no end date
+}
+
+function UnitData.IsEventActive()
+	local e = UnitData.Event
+	return e ~= nil and e.Enabled and (e.EndsAt == nil or os.time() < e.EndsAt)
+end
 
 -- How many different units a player can bring into a match
 UnitData.TeamSize = 6
