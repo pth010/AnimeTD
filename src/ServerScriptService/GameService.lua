@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: matches end on a 30-second results screen with a damage
---  summary, where the team can Play Again or return to the lobby, see ResultsUI)
+-- (replaces the earlier version: enemies are now models (see EnemyModels) that face the way
+--  they walk, bob as they move and have a health bar)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -14,6 +14,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local UnitModels = require(ReplicatedStorage:WaitForChild("UnitModels"))
+local EnemyModels = require(ReplicatedStorage:WaitForChild("EnemyModels"))
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
 
 local arenasFolder = workspace:WaitForChild("Arenas")
@@ -54,11 +55,12 @@ local FREE_2X_IN_STUDIO = true -- lets you test 2x in Studio without buying the 
 local SPEEDS = { [1] = true, [1.5] = true, [2] = true }
 
 -- Enemy types. Health/speed/reward are multipliers on the wave's base values.
+-- Size is the hitbox (the model is scaled to its height). Bob = how much it bounces as it walks.
 local ENEMY_TYPES = {
-	Normal = { HealthMult = 1,   SpeedMult = 1,   RewardMult = 1,   BaseDamage = 1,  Size = Vector3.new(2, 3, 2),       Color = Color3.fromRGB(200, 50, 50) },
-	Fast   = { HealthMult = 0.6, SpeedMult = 1.8, RewardMult = 1.2, BaseDamage = 1,  Size = Vector3.new(1.6, 2.4, 1.6), Color = Color3.fromRGB(255, 170, 40) },
-	Tank   = { HealthMult = 3,   SpeedMult = 0.6, RewardMult = 2,   BaseDamage = 2,  Size = Vector3.new(3, 4, 3),       Color = Color3.fromRGB(80, 90, 130) },
-	Boss   = { HealthMult = 8,   SpeedMult = 0.5, RewardMult = 10,  BaseDamage = 10, Size = Vector3.new(5, 7, 5),       Color = Color3.fromRGB(60, 10, 10) },
+	Normal = { Name = "Oni Grunt",   HealthMult = 1,   SpeedMult = 1,   RewardMult = 1,   BaseDamage = 1,  Size = Vector3.new(2, 3.2, 2),   Bob = 0.25 },
+	Fast   = { Name = "Shadow Wolf", HealthMult = 0.6, SpeedMult = 1.8, RewardMult = 1.2, BaseDamage = 1,  Size = Vector3.new(1.6, 2.4, 3), Bob = 0.3 },
+	Tank   = { Name = "Stone Golem", HealthMult = 3,   SpeedMult = 0.6, RewardMult = 2,   BaseDamage = 2,  Size = Vector3.new(3.4, 4.6, 3), Bob = 0.12 },
+	Boss   = { Name = "Demon King",  HealthMult = 8,   SpeedMult = 0.5, RewardMult = 10,  BaseDamage = 10, Size = Vector3.new(5, 7.6, 5),   Bob = 0.15, ShowName = true },
 }
 
 -- ===== ARENAS =====
@@ -193,6 +195,65 @@ local function makeNameTag(parent, text, offsetY)
 	return label
 end
 
+-- A health bar floating over an enemy. Returns a function that updates it.
+local function makeHealthBar(parent, maxHp, offsetY, name)
+	local wide = name ~= nil
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromOffset(wide and 160 or 70, wide and 34 or 12)
+	gui.StudsOffset = Vector3.new(0, offsetY, 0)
+	gui.AlwaysOnTop = true
+	gui.MaxDistance = 250
+	gui.Parent = parent
+
+	if wide then
+		local title = Instance.new("TextLabel")
+		title.Size = UDim2.new(1, 0, 0, 16)
+		title.BackgroundTransparency = 1
+		title.Text = string.upper(name)
+		title.TextColor3 = Color3.fromRGB(255, 90, 90)
+		title.TextStrokeTransparency = 0
+		title.Font = Enum.Font.GothamBlack
+		title.TextSize = 14
+		title.Parent = gui
+	end
+
+	local back = Instance.new("Frame")
+	back.AnchorPoint = Vector2.new(0, 1)
+	back.Position = UDim2.fromScale(0, 1)
+	back.Size = UDim2.new(1, 0, 0, wide and 14 or 10)
+	back.BackgroundColor3 = Color3.fromRGB(20, 15, 20)
+	back.BorderSizePixel = 0
+	back.Parent = gui
+	Instance.new("UICorner", back).CornerRadius = UDim.new(0, 4)
+
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.fromScale(1, 1)
+	fill.BackgroundColor3 = Color3.fromRGB(90, 220, 90)
+	fill.BorderSizePixel = 0
+	fill.Parent = back
+	Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 4)
+
+	local text
+	if wide then
+		text = Instance.new("TextLabel")
+		text.Size = UDim2.fromScale(1, 1)
+		text.BackgroundTransparency = 1
+		text.TextColor3 = Color3.new(1, 1, 1)
+		text.TextStrokeTransparency = 0.3
+		text.Font = Enum.Font.GothamBold
+		text.TextSize = 11
+		text.Text = tostring(maxHp)
+		text.Parent = back
+	end
+
+	return function(hp)
+		local pct = math.clamp(hp / maxHp, 0, 1)
+		fill.Size = UDim2.fromScale(pct, 1)
+		fill.BackgroundColor3 = Color3.fromRGB(230, 60, 60):Lerp(Color3.fromRGB(90, 220, 90), pct)
+		if text then text.Text = tostring(math.ceil(hp)) end
+	end
+end
+
 -- ===== ENEMIES =====
 -- Which enemies appear in a wave, in a shuffled spawn order
 local function buildWave(wave)
@@ -216,24 +277,44 @@ local function buildWave(wave)
 	return list
 end
 
+-- Turns a direction into a rotation that faces it on the ground plane
+local function facing(dir)
+	local flat = Vector3.new(dir.X, 0, dir.Z)
+	if flat.Magnitude < 0.01 then return nil end
+	return CFrame.lookAt(Vector3.zero, flat)
+end
+
 local function spawnEnemy(arena, wave, typeName)
 	local def = ENEMY_TYPES[typeName]
 	local maxHp = math.floor((50 + wave * 25) * def.HealthMult)
 	local offset = Vector3.new(0, def.Size.Y / 2, 0)
+	local start = arena.Waypoints[1].Position + offset
+	local face = facing(arena.Waypoints[2].Position - arena.Waypoints[1].Position) or CFrame.new()
 
+	-- An invisible hitbox that moves along the path, with the model welded to it
 	local part = Instance.new("Part")
 	part.Name = typeName
 	part.Size = def.Size
-	part.Color = def.Color
+	part.Transparency = 1
 	part.Anchored = true
 	part.CanCollide = false
-	part.Position = arena.Waypoints[1].Position + offset
-	local label = makeNameTag(part, tostring(maxHp), def.Size.Y / 2 + 1)
+	part.CanQuery = false -- so enemies never get in the way of clicking to place units
+	part.CanTouch = false
+	part.CFrame = CFrame.new(start) * face
+
+	local model = EnemyModels.Build(typeName, def.Size.Y)
+	model:PivotTo(part.CFrame * CFrame.new(0, -def.Size.Y / 2, 0))
+	EnemyModels.AttachTo(model, part)
+	local setHealth = makeHealthBar(part, maxHp, def.Size.Y / 2 + 0.8, def.ShowName and def.Name or nil)
 	part.Parent = arena.EnemyFolder
 
 	table.insert(arena.Enemies, {
 		Part = part,
-		Label = label,
+		SetHealth = setHealth,
+		Pos = start,       -- where it really is on the path (the model bobs around this)
+		Facing = face,
+		Bob = def.Bob,
+		Phase = math.random() * math.pi * 2,
 		Offset = offset,
 		Health = maxHp,
 		Speed = (6 + wave * 0.25) * def.SpeedMult * ENEMY_SPEED_MULT,
@@ -266,13 +347,13 @@ local function damageEnemy(arena, enemy, amount, owner)
 		addCash(owner, enemy.Reward)
 		enemy.Part:Destroy()
 	else
-		enemy.Label.Text = tostring(math.ceil(enemy.Health))
+		enemy.SetHealth(enemy.Health)
 	end
 end
 
 local function enemyProgress(arena, e)
 	local target = arena.Waypoints[e.Index].Position + e.Offset
-	return e.Index * 1000 - (target - e.Part.Position).Magnitude
+	return e.Index * 1000 - (target - e.Pos).Magnitude
 end
 
 -- ===== SIMULATION (runs every arena) =====
@@ -287,20 +368,28 @@ local function stepArena(arena, dt)
 	for _, e in ipairs(enemies) do
 		if not e.Dead then
 			local target = waypoints[e.Index].Position + e.Offset
-			local pos = e.Part.Position
-			local offset = target - pos
+			local offset = target - e.Pos
 			local step = e.Speed * dt
 
 			if step >= offset.Magnitude then
-				e.Part.Position = target
+				e.Pos = target
 				e.Index += 1
 				if e.Index > #waypoints then
 					e.Dead = true
 					e.Part:Destroy()
 					damageBase(arena, e.BaseDamage)
+				else
+					e.Facing = facing(waypoints[e.Index].Position - target) or e.Facing
 				end
 			else
-				e.Part.Position = pos + offset.Unit * step
+				e.Pos += offset.Unit * step
+				e.Facing = facing(offset) or e.Facing
+			end
+
+			if not e.Dead then
+				-- a little hop with every step
+				local hop = math.abs(math.sin(arena.Clock * 7 + e.Phase)) * e.Bob
+				e.Part.CFrame = CFrame.new(e.Pos + Vector3.new(0, hop, 0)) * e.Facing
 			end
 		end
 	end
@@ -313,8 +402,8 @@ local function stepArena(arena, dt)
 			for _, e in ipairs(enemies) do
 				if not e.Dead then
 					-- range is measured on the ground plane, so height never eats into it
-					local dx = e.Part.Position.X - u.Part.Position.X
-					local dz = e.Part.Position.Z - u.Part.Position.Z
+					local dx = e.Pos.X - u.Part.Position.X
+					local dz = e.Pos.Z - u.Part.Position.Z
 					if math.sqrt(dx * dx + dz * dz) <= u.Stats.Range then
 						local p = enemyProgress(arena, e)
 						if not bestProgress or p > bestProgress then
