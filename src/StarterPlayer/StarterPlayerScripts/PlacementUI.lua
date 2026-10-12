@@ -1,7 +1,7 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: PlacementUI
--- (replaces the earlier version: adds the click-a-unit upgrade/sell panel)
+-- (replaces the earlier version: the upgrade panel shows income for cash units)
 -- HUD (wave, base HP, cash), unit hotbar, click-to-place with a range preview.
 -- Controls: click a unit in the hotbar, then click a green plot to place it.
 -- Click a placed unit (with nothing selected) to upgrade or sell it.
@@ -172,14 +172,23 @@ local function refreshPanel()
 	local sellValue = inspected:GetAttribute("SellValue") or 0
 
 	panelTitle.Text = string.format("%s  Lv %d/%d", inspected.Name, level, maxLevel)
-	local statsText = string.format("Damage: %d\nRange: %.1f", math.floor(damage), range)
-	if inspected:GetAttribute("HighGround") then
-		statsText ..= "\nHigh ground bonus!"
+	local isFarm = inspected:GetAttribute("IsFarm") == true
+	local statsText
+	if isFarm then
+		local nextIncome = inspected:GetAttribute("NextIncome") or 0
+		statsText = string.format("Income: $%d per wave", inspected:GetAttribute("Income") or 0)
+		statsText ..= nextIncome > 0 and string.format("\nNext level: $%d per wave", nextIncome) or "\nMax income!"
+	else
+		statsText = string.format("Damage: %d\nRange: %.1f", math.floor(damage), range)
+		if inspected:GetAttribute("HighGround") then
+			statsText ..= "\nHigh ground bonus!"
+		end
 	end
 	panelStats.Text = statsText
 	upgradeBtn.Text = cost >= 0 and string.format("Upgrade ($%d)", cost) or "MAX LEVEL"
 	sellBtn.Text = string.format("Sell (+$%d)", sellValue)
 
+	rangeRing.Transparency = isFarm and 1 or 0.75 -- cash units have no attack range
 	rangeRing.Size = Vector3.new(0.2, range * 2, range * 2)
 	-- on the ground under the unit's hitbox
 	rangeRing.CFrame = CFrame.new(inspected.Position - Vector3.new(0, inspected.Size.Y / 2 - 0.1, 0)) * CFrame.Angles(0, 0, math.rad(90))

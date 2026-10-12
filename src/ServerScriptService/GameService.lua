@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: enforces the per-rarity placement limits from UnitData and
---  tells each player how many of each unit they have placed, for the hotbar)
+-- (replaces the earlier version: adds cash units (UnitData.Farms) - they don't attack, have
+--  their own upgrade prices, and pay their owner after every cleared wave)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -397,7 +397,7 @@ local function stepArena(arena, dt)
 	-- Unit attacks (target the enemy furthest along the path)
 	local now = arena.Clock
 	for _, u in ipairs(arena.Units) do
-		if now - u.LastAttack >= u.Stats.Cooldown then
+		if not u.Farm and now - u.LastAttack >= u.Stats.Cooldown then
 			local best, bestProgress
 			for _, e in ipairs(enemies) do
 				if not e.Dead then
@@ -455,8 +455,15 @@ local function scaledStats(base, level, highGround)
 	}
 end
 
+local function maxLevel(u)
+	return u.Farm and #u.Farm.Income or UPGRADE_MAX_LEVEL
+end
+
 local function upgradeCost(u)
-	if u.Level >= UPGRADE_MAX_LEVEL then return -1 end
+	if u.Level >= maxLevel(u) then return -1 end
+	if u.Farm then
+		return u.Farm.UpgradeCosts[u.Level]
+	end
 	return math.floor(u.BaseStats.Cost * UPGRADE_COST_MULT * u.Level)
 end
 
@@ -465,13 +472,34 @@ local function refreshUnit(u)
 	local part = u.Part
 	part:SetAttribute("OwnerId", u.Owner.UserId)
 	part:SetAttribute("Level", u.Level)
-	part:SetAttribute("MaxLevel", UPGRADE_MAX_LEVEL)
+	part:SetAttribute("MaxLevel", maxLevel(u))
 	part:SetAttribute("UpgradeCost", upgradeCost(u))
 	part:SetAttribute("SellValue", math.floor(u.Invested * SELL_REFUND))
 	part:SetAttribute("Damage", u.Stats.Damage)
 	part:SetAttribute("Range", u.Stats.Range)
 	part:SetAttribute("HighGround", u.HighGround)
-	u.Label.Text = string.format("%s Lv%d%s", part.Name, u.Level, u.HighGround and " (High)" or "")
+	if u.Farm then
+		part:SetAttribute("IsFarm", true)
+		part:SetAttribute("Income", u.Farm.Income[u.Level])
+		part:SetAttribute("NextIncome", u.Farm.Income[u.Level + 1] or 0)
+		u.Label.Text = string.format("%s Lv%d ($%d/wave)", part.Name, u.Level, u.Farm.Income[u.Level])
+	else
+		u.Label.Text = string.format("%s Lv%d%s", part.Name, u.Level, u.HighGround and " (High)" or "")
+	end
+end
+
+-- Cash units pay out when a wave is cleared, with a "+$250" popping up over each one
+local function payFarms(arena)
+	for _, u in ipairs(arena.Units) do
+		if u.Farm then
+			local amount = u.Farm.Income[u.Level]
+			addCash(u.Owner, amount)
+			local pop = makeNameTag(u.Part, "+$" .. amount, 4.6)
+			pop.TextColor3 = Color3.fromRGB(255, 215, 80)
+			pop.TextSize = 20
+			Debris:AddItem(pop.Parent, 1.5)
+		end
+	end
 end
 
 -- Tells the player how many of each unit they have placed ("Blade Novice=2;Frost Mage=1")
@@ -642,6 +670,7 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 		Level = 1,
 		Invested = stats.Cost,
 		LastAttack = -math.huge, -- ready to attack straight away
+		Farm = UnitData.Farms[unitName], -- set for cash units
 	}
 	table.insert(arena.Units, u)
 	refreshUnit(u)
@@ -858,6 +887,7 @@ local function playMatch(arena, participants)
 		if not participantsLeft(arena) then return nil end
 		if arena.State ~= "Playing" then return false end -- base destroyed
 
+		payFarms(arena)
 		for p in pairs(arena.Players) do
 			PlayerData.AddGems(p, WAVE_GEMS)
 			statsFor(arena, p).Gems += WAVE_GEMS

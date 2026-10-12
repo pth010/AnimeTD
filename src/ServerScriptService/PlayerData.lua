@@ -1,7 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: ModuleScript
 -- NAME: PlayerData
--- (replaces the earlier version: adds Gold, the main-game currency earned by winning matches)
+-- (replaces the earlier version: auto-equip always puts your cash units on the team)
 --
 -- Single source of truth for each player's gems, gold, pity, units, locks, team and settings.
 -- Saving needs a published place (File > Publish to Roblox). To test in Studio, also enable
@@ -63,7 +63,12 @@ local function cleanCounts(t)
 end
 
 -- ===== Team helpers =====
+-- How auto-equip ranks units: cash units first (they never attack, so damage can't
+-- rank them), then everything else by damage per second
 local function dps(unitName)
+	if UnitData.IsFarm(unitName) then
+		return math.huge
+	end
 	local s = UnitData.GetStats(unitName)
 	return s.Damage / s.Cooldown
 end

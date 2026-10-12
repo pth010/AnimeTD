@@ -28,8 +28,8 @@ local DARK = rgb(40, 35, 45)
 local WHITE = rgb(255, 255, 255)
 
 -- ===== LOOKS =====
--- Hair:   Spiky, Long, Hood, Helmet, WizardHat, Crown, FoxEars, Horns
--- Weapon: Sword, Katana, Bow, Lance, Staff, SwordShield, Daggers
+-- Hair:   Spiky, Long, Hood, Helmet, WizardHat, Crown, FoxEars, Horns, StrawHat
+-- Weapon: Sword, Katana, Bow, Lance, Staff, SwordShield, Daggers, CoinBag, LuckyFan
 -- Extras: Cape = color, Wings = color, Tails = number of fox tails, Aura = color (sparkles + glow)
 UnitModels.Looks = {
 	-- Common
@@ -58,7 +58,13 @@ UnitModels.Looks = {
 		Hair = "Long", HairColor = rgb(215, 220, 235), Eyes = rgb(150, 160, 255), Weapon = "Staff",
 		Glow = rgb(255, 245, 190), Cape = rgb(120, 130, 200) },
 
+	["Coin Merchant"] = { Outfit = rgb(60, 125, 95), Pants = rgb(95, 75, 55), Accent = GOLD,
+		Hair = "StrawHat", HairColor = rgb(70, 45, 30), Eyes = rgb(90, 65, 40), Weapon = "CoinBag" },
+
 	-- Legendary
+	["Fortune Maiden"] = { Outfit = rgb(250, 248, 245), Pants = rgb(200, 35, 45), Accent = rgb(200, 35, 45),
+		Hair = "Long", HairColor = rgb(35, 28, 35), Eyes = rgb(230, 170, 40), Weapon = "LuckyFan",
+		Cape = rgb(230, 185, 60), Aura = rgb(255, 210, 90), Glow = GOLD },
 	["Dragon Knight"] = { Outfit = rgb(170, 30, 30), Pants = rgb(60, 25, 25), Accent = GOLD,
 		Hair = "Horns", HairColor = rgb(120, 25, 25), Eyes = rgb(255, 200, 60), Weapon = "Lance",
 		Wings = rgb(140, 25, 30), Aura = rgb(255, 120, 60), Glow = rgb(255, 150, 60) },
@@ -193,6 +199,17 @@ function HAIR.FoxEars(m, look)
 	end
 end
 
+function HAIR.StrawHat(m, look)
+	-- short hair peeking out under the hat
+	add(m, "Hair", Vector3.new(1.3, 0.3, 1.3), CFrame.new(0, 5.12, 0.02), look.HairColor)
+	add(m, "HairBack", Vector3.new(1.3, 0.8, 0.3), CFrame.new(0, 4.75, 0.55), look.HairColor)
+	local straw = rgb(225, 195, 115)
+	disc(m, "Brim", 2.5, 0.12, Vector3.new(0, 5.25, 0), straw, Enum.Material.Fabric)
+	add(m, "Crown1", Vector3.new(1.15, 0.35, 1.15), CFrame.new(0, 5.45, 0), straw, Enum.Material.Fabric)
+	add(m, "Crown2", Vector3.new(0.6, 0.3, 0.6), CFrame.new(0, 5.72, 0), straw, Enum.Material.Fabric)
+	add(m, "Band", Vector3.new(1.18, 0.1, 1.18), CFrame.new(0, 5.33, 0), look.Outfit)
+end
+
 function HAIR.Horns(m, look)
 	HAIR.Helmet(m, look)
 	for _, side in ipairs({ -1, 1 }) do
@@ -274,6 +291,30 @@ function WEAPON.Bow(m, look)
 	end
 	add(m, "BowString", Vector3.new(0.04, 2.5, 0.04), hold * CFrame.new(0, 0, 0.42), look.Glow or WHITE, Enum.Material.Neon)
 	add(m, "Quiver", Vector3.new(0.5, 1.5, 0.5), CFrame.new(0.45, 3.2, 0.62) * CFrame.Angles(0, 0, R(-20)), WOOD)
+end
+
+-- A sack of gold in the left hand and a coin held up in the right
+function WEAPON.CoinBag(m, look)
+	local sack = CFrame.new(-1.35, 1.85, -0.2)
+	ball(m, "Sack", 1.1, sack, rgb(150, 110, 65), Enum.Material.Fabric)
+	add(m, "SackTie", Vector3.new(0.5, 0.18, 0.5), sack * CFrame.new(0, 0.5, 0), rgb(110, 80, 45))
+	for i = 1, 3 do
+		disc(m, "Coins" .. i, 0.36, 0.07, (sack * CFrame.new(-0.05 + i * 0.03, 0.55 + i * 0.07, 0)).Position, GOLD, Enum.Material.Neon)
+	end
+	local coin = add(m, "Coin", Vector3.new(0.08, 0.5, 0.5), RIGHT_HAND * CFrame.new(0, 0.45, -0.2), GOLD, Enum.Material.Neon)
+	coin.Shape = Enum.PartType.Cylinder
+end
+
+-- A golden fan in the right hand, with a lucky charm hanging from the left
+function WEAPON.LuckyFan(m, look)
+	local grip = RIGHT_HAND * CFrame.new(0, 0.3, -0.25) * CFrame.Angles(R(-20), 0, 0)
+	for i, angle in ipairs({ -50, -25, 0, 25, 50 }) do
+		add(m, "FanBlade" .. i, Vector3.new(0.06, 1.1, 0.3),
+			grip * CFrame.Angles(0, 0, R(angle)) * CFrame.new(0, 0.55, 0), i % 2 == 0 and look.Pants or GOLD,
+			i % 2 == 0 and Enum.Material.Fabric or Enum.Material.Neon)
+	end
+	add(m, "Charm", Vector3.new(0.35, 0.5, 0.1), LEFT_HAND * CFrame.new(0, -0.35, -0.1), look.Pants, Enum.Material.Fabric)
+	ball(m, "CharmBead", 0.18, LEFT_HAND * CFrame.new(0, -0.05, -0.1), GOLD, Enum.Material.Neon)
 end
 
 -- ===== Extras =====

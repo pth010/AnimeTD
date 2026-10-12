@@ -1,8 +1,8 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: UnitData
--- (replaces the earlier version: adds placement limits per rarity - how many copies of
---  the same unit one player can have on the map at once)
+-- (replaces the earlier version: adds two cash units - Coin Merchant (Epic) and Fortune
+--  Maiden (Legendary) - that don't attack but pay you cash after every wave)
 
 local UnitData = {}
 
@@ -19,8 +19,8 @@ UnitData.Rarities = {
 UnitData.Units = {
 	Common    = { "Blade Novice", "Ember Archer", "Mist Scout" },
 	Rare      = { "Storm Lancer", "Frost Mage", "Iron Guard" },
-	Epic      = { "Shadow Dancer", "Flame Ronin", "Moon Priestess" },
-	Legendary = { "Dragon Knight", "Celestial Sage" },
+	Epic      = { "Shadow Dancer", "Flame Ronin", "Moon Priestess", "Coin Merchant" },
+	Legendary = { "Dragon Knight", "Celestial Sage", "Fortune Maiden" },
 	Mythic    = { "Eclipse Emperor", "Starfall Kitsune" }, -- Starfall Kitsune: event only (see UnitData.Event)
 }
 
@@ -38,7 +38,29 @@ UnitData.RarityStats = {
 UnitData.StatOverrides = {
 	-- The event unit is a cut above the regular Mythic
 	["Starfall Kitsune"] = { Damage = 380, Range = 26, Cooldown = 0.55, Cost = 1800 },
+	-- Cash units don't attack (Range is only the size of the placement preview)
+	["Coin Merchant"]    = { Damage = 0, Range = 4, Cooldown = 1, Cost = 400 },
+	["Fortune Maiden"]   = { Damage = 0, Range = 4, Cooldown = 1, Cost = 800 },
 }
+
+-- ===== CASH UNITS ("farms") =====
+-- They don't attack. Every time your team clears a wave, each one pays its owner
+-- Income[level] cash. UpgradeCosts[n] is the price to go from level n to level n + 1,
+-- so a farm's max level is the number of Income entries.
+UnitData.Farms = {
+	["Coin Merchant"] = {               -- Epic: place for $400
+		Income       = { 250, 450, 800 },
+		UpgradeCosts = { 600, 900 },
+	},
+	["Fortune Maiden"] = {              -- Legendary: place for $800, 5 upgrades
+		Income       = { 350, 600, 950, 1400, 2000, 2800 },
+		UpgradeCosts = { 1000, 1400, 2000, 2800, 3800 },
+	},
+}
+
+function UnitData.IsFarm(unitName)
+	return UnitData.Farms[unitName] ~= nil
+end
 
 -- ===== LIMITED EVENT BANNER =====
 -- While the event is active, every Mythic you pull has a RateUp chance of being the
