@@ -1,8 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: cash units' name tags no longer show their per-wave income;
---  it's still in the upgrade panel)
+-- (replaces the earlier version: every enemy's health bar shows its HP number, not just the boss's)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -199,7 +198,7 @@ end
 local function makeHealthBar(parent, maxHp, offsetY, name)
 	local wide = name ~= nil
 	local gui = Instance.new("BillboardGui")
-	gui.Size = UDim2.fromOffset(wide and 160 or 70, wide and 34 or 12)
+	gui.Size = UDim2.fromOffset(wide and 160 or 80, wide and 34 or 15)
 	gui.StudsOffset = Vector3.new(0, offsetY, 0)
 	gui.AlwaysOnTop = true
 	gui.MaxDistance = 250
@@ -220,7 +219,7 @@ local function makeHealthBar(parent, maxHp, offsetY, name)
 	local back = Instance.new("Frame")
 	back.AnchorPoint = Vector2.new(0, 1)
 	back.Position = UDim2.fromScale(0, 1)
-	back.Size = UDim2.new(1, 0, 0, wide and 14 or 10)
+	back.Size = UDim2.new(1, 0, 0, wide and 14 or 15)
 	back.BackgroundColor3 = Color3.fromRGB(20, 15, 20)
 	back.BorderSizePixel = 0
 	back.Parent = gui
@@ -233,24 +232,22 @@ local function makeHealthBar(parent, maxHp, offsetY, name)
 	fill.Parent = back
 	Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 4)
 
-	local text
-	if wide then
-		text = Instance.new("TextLabel")
-		text.Size = UDim2.fromScale(1, 1)
-		text.BackgroundTransparency = 1
-		text.TextColor3 = Color3.new(1, 1, 1)
-		text.TextStrokeTransparency = 0.3
-		text.Font = Enum.Font.GothamBold
-		text.TextSize = 11
-		text.Text = tostring(maxHp)
-		text.Parent = back
-	end
+	-- the HP number, written on top of the bar
+	local text = Instance.new("TextLabel")
+	text.Size = UDim2.fromScale(1, 1)
+	text.BackgroundTransparency = 1
+	text.TextColor3 = Color3.new(1, 1, 1)
+	text.TextStrokeTransparency = 0.3
+	text.Font = Enum.Font.GothamBold
+	text.TextSize = 11
+	text.Text = tostring(maxHp)
+	text.Parent = back
 
 	return function(hp)
 		local pct = math.clamp(hp / maxHp, 0, 1)
 		fill.Size = UDim2.fromScale(pct, 1)
 		fill.BackgroundColor3 = Color3.fromRGB(230, 60, 60):Lerp(Color3.fromRGB(90, 220, 90), pct)
-		if text then text.Text = tostring(math.ceil(hp)) end
+		text.Text = tostring(math.ceil(hp))
 	end
 end
 
