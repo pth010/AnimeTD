@@ -254,13 +254,17 @@ local function formatTimeLeft(seconds)
 	return string.format("%dm %ds", m, seconds % 60)
 end
 
+local celebrateUntil = 0 -- while this is in the future, the subtitle shows "You summoned ..."
+
 local function refreshEvent()
 	local active = UnitData.IsEventActive() and featuredRarity ~= nil
 	if active then
 		title.Text = string.upper(event.Name)
-		subtitle.Text = event.EndsAt
-			and ("Limited banner  -  ends in " .. formatTimeLeft(event.EndsAt - os.time()))
-			or "Limited banner  -  for a limited time only!"
+		if os.clock() >= celebrateUntil then
+			subtitle.Text = event.EndsAt
+				and ("Limited banner  -  ends in " .. formatTimeLeft(event.EndsAt - os.time()))
+				or "Limited banner  -  for a limited time only!"
+		end
 		tagText.Text = "LIMITED  " .. featuredRarity:upper()
 		featuredLabel.Text = featuredName
 		featuredInfo.Text = string.format("%s  -  RATE UP!", featuredRarity)
@@ -377,6 +381,7 @@ local function doSummon(count)
 			task.wait(0.06) -- cards pop in one after another
 		end
 		if gotFeatured then
+			celebrateUntil = os.clock() + 4
 			subtitle.Text = "★ You summoned " .. featuredName .. "! ★"
 		end
 	end
