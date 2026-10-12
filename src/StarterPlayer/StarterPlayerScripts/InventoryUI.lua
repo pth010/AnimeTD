@@ -19,6 +19,9 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "InventoryGui"
 gui.ResetOnSpawn = false
 gui.DisplayOrder = 1
+-- children always draw on top of their parent (so the Trait Odds and delete windows show
+-- their contents above the cards)
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = player:WaitForChild("PlayerGui")
 
 -- Open button (left side of the screen)
