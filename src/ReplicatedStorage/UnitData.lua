@@ -1,8 +1,8 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: UnitData
--- (replaces the earlier version: adds the limited Starfall Festival event and its
---  featured Mythic unit, Starfall Kitsune)
+-- (replaces the earlier version: adds placement limits per rarity - how many copies of
+--  the same unit one player can have on the map at once)
 
 local UnitData = {}
 
@@ -61,6 +61,16 @@ end
 -- How many different units a player can bring into a match
 UnitData.TeamSize = 6
 
+-- How many of the SAME unit one player can have placed at once, by rarity
+-- (e.g. up to 5 Blade Novices, but only 2 Eclipse Emperors)
+UnitData.PlacementLimits = {
+	Common    = 5,
+	Rare      = 5,
+	Epic      = 4,
+	Legendary = 3,
+	Mythic    = 2,
+}
+
 -- Units placed on the mountain's high ground get this much extra range
 UnitData.HighGroundRangeMult = 1.3
 
@@ -75,6 +85,11 @@ for rarityName, list in pairs(UnitData.Units) do
 	for _, unitName in ipairs(list) do
 		UnitData.UnitRarity[unitName] = rarityName
 	end
+end
+
+function UnitData.GetPlacementLimit(unitName)
+	local rarity = UnitData.UnitRarity[unitName]
+	return rarity and UnitData.PlacementLimits[rarity] or math.huge
 end
 
 function UnitData.GetStats(unitName)

@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: enemies are now models (see EnemyModels) that face the way
---  they walk, bob as they move and have a health bar)
+-- (replaces the earlier version: enforces the per-rarity placement limits from UnitData and
+--  tells each player how many of each unit they have placed, for the hotbar)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -34,7 +34,7 @@ local BASE_HEALTH = 20
 local INTERMISSION = 10
 local SPAWN_INTERVAL = 1
 local MIN_UNIT_SPACING = 4
-local MAX_UNITS_PER_PLAYER = 12
+local MAX_UNITS_PER_PLAYER = 12 -- total units per player, on top of the per-unit limits in UnitData
 local WAVE_GEMS = 20        -- gems for every player when a wave is cleared (set to 0 to turn off)
 local WIN_GEMS = 75         -- gems for every player when the team wins the match
 local WIN_GOLD = 375        -- gold for every player when the team wins the match
@@ -474,6 +474,21 @@ local function refreshUnit(u)
 	u.Label.Text = string.format("%s Lv%d%s", part.Name, u.Level, u.HighGround and " (High)" or "")
 end
 
+-- Tells the player how many of each unit they have placed ("Blade Novice=2;Frost Mage=1")
+local function syncPlacedCounts(arena, player)
+	local counts = {}
+	for _, u in ipairs(arena.Units) do
+		if u.Owner == player then
+			counts[u.Part.Name] = (counts[u.Part.Name] or 0) + 1
+		end
+	end
+	local list = {}
+	for name, n in pairs(counts) do
+		table.insert(list, name .. "=" .. n)
+	end
+	player:SetAttribute("PlacedCounts", table.concat(list, ";"))
+end
+
 local function findUnit(arena, part)
 	for i, u in ipairs(arena.Units) do
 		if u.Part == part then
@@ -554,12 +569,19 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 		return { Success = false, Error = "Not enough cash." }
 	end
 
-	local owned = 0
+	local owned, sameUnit = 0, 0
 	for _, u in ipairs(arena.Units) do
-		if u.Owner == player then owned += 1 end
+		if u.Owner == player then
+			owned += 1
+			if u.Part.Name == unitName then sameUnit += 1 end
+		end
 	end
 	if owned >= MAX_UNITS_PER_PLAYER then
 		return { Success = false, Error = "Unit limit reached." }
+	end
+	local limit = UnitData.GetPlacementLimit(unitName)
+	if sameUnit >= limit then
+		return { Success = false, Error = string.format("You can only place %d %s.", limit, unitName) }
 	end
 
 	-- Server decides the real spot: look straight down at what's there
@@ -623,6 +645,7 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 	}
 	table.insert(arena.Units, u)
 	refreshUnit(u)
+	syncPlacedCounts(arena, player)
 	return { Success = true }
 end
 
@@ -664,6 +687,7 @@ actionRemote.OnServerInvoke = function(player, action, part)
 		addCash(player, math.floor(u.Invested * SELL_REFUND))
 		u.Part:Destroy()
 		table.remove(arena.Units, index)
+		syncPlacedCounts(arena, player)
 		return { Success = true }
 	end
 
@@ -759,6 +783,9 @@ local function clearBoard(arena)
 	table.clear(arena.Enemies)
 	for _, u in ipairs(arena.Units) do u.Part:Destroy() end
 	table.clear(arena.Units)
+	for p in pairs(arena.Players) do
+		p:SetAttribute("PlacedCounts", "")
+	end
 
 	setMatchAttr(arena, "BaseHealth", BASE_HEALTH)
 	setMatchAttr(arena, "Wave", 0)
@@ -772,6 +799,7 @@ local function sendToLobby(arena, p)
 	playerArena[p] = nil
 	p:SetAttribute("InMatch", false)
 	p:SetAttribute("ArenaId", nil)
+	p:SetAttribute("PlacedCounts", "")
 	teleportTo(p, lobbySpawn, 8)
 end
 

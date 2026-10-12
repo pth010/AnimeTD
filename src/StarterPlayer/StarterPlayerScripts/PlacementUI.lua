@@ -6,6 +6,7 @@
 -- Controls: click a unit in the hotbar, then click a green plot to place it.
 -- Click a placed unit (with nothing selected) to upgrade or sell it.
 -- Keys 1-6 pick the unit in that hotbar slot (press the same key again to put it away).
+-- Each hotbar slot shows how many of that unit you've placed out of its limit (e.g. 2/5).
 -- Q or right-click cancels / closes. (When nothing is open, Q is sprint/dash: see MovementController.)
 
 local Players = game:GetService("Players")
@@ -266,6 +267,18 @@ local SLOT_KEYS = {
 }
 local hotbarNames = {} -- unit name in each hotbar slot, filled by rebuildHotbar
 
+-- How many of each unit you have placed right now (the server keeps this up to date)
+local function placedCount(name)
+	for unit, n in string.gmatch(player:GetAttribute("PlacedCounts") or "", "([^;=]+)=(%d+)") do
+		if unit == name then return tonumber(n) end
+	end
+	return 0
+end
+
+local function atLimit(name)
+	return placedCount(name) >= UnitData.GetPlacementLimit(name)
+end
+
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
 
@@ -275,6 +288,8 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		local name = hotbarNames[slot]
 		if not name then
 			showToast("No unit in slot " .. slot .. ".")
+		elseif atLimit(name) and selected ~= name then
+			showToast(string.format("%s limit reached (%d/%d).", name, placedCount(name), UnitData.GetPlacementLimit(name)))
 		elseif selected == name then
 			selectUnit(nil) -- same key again puts it away
 		else
@@ -330,6 +345,26 @@ function refreshHotbarHighlight()
 	end
 end
 
+-- Shows "placed/limit" on each slot and greys out the ones that are full
+local function refreshHotbarCounts()
+	for i, name in ipairs(hotbarNames) do
+		local b = hotbarButtons[name]
+		if b then
+			local limit = UnitData.GetPlacementLimit(name)
+			local placed = placedCount(name)
+			local full = placed >= limit
+			local color = UnitData.RarityColor[UnitData.UnitRarity[name]]
+			b.Text = string.format("[%d] %s\n$%d  -  %d/%d", i, name, UnitData.GetStats(name).Cost, placed, limit)
+			b.BackgroundColor3 = full and color:Lerp(Color3.fromRGB(60, 60, 70), 0.75) or color
+			b.TextTransparency = full and 0.35 or 0
+		end
+	end
+	-- stop placing a unit once you've hit its limit
+	if selected and atLimit(selected) then
+		selectUnit(nil)
+	end
+end
+
 local function rebuildHotbar()
 	for _, c in ipairs(hotbar:GetChildren()) do
 		if c:IsA("TextButton") then c:Destroy() end
@@ -372,14 +407,21 @@ local function rebuildHotbar()
 		stroke.Parent = b
 		hotbarButtons[name] = b
 		b.Activated:Connect(function()
+			if atLimit(name) then
+				showToast(string.format("%s limit reached (%d/%d).", name, placedCount(name), UnitData.GetPlacementLimit(name)))
+				return
+			end
 			selectUnit(name)
 		end)
 	end
 end
 rebuildHotbar()
+refreshHotbarCounts()
 refreshHotbarHighlight()
+player:GetAttributeChangedSignal("PlacedCounts"):Connect(refreshHotbarCounts)
 player:GetAttributeChangedSignal("Equipped"):Connect(function()
 	rebuildHotbar()
+	refreshHotbarCounts()
 	if selected and not hotbarButtons[selected] then
 		selectUnit(nil) -- the unit you were placing left your team
 	else
