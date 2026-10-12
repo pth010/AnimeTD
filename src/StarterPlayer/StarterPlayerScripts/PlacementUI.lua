@@ -5,6 +5,7 @@
 -- HUD (wave, base HP, cash), unit hotbar, click-to-place with a range preview.
 -- Controls: click a unit in the hotbar, then click a green plot to place it.
 -- Click a placed unit (with nothing selected) to upgrade or sell it.
+-- Keys 1-6 pick the unit in that hotbar slot (press the same key again to put it away).
 -- Q or right-click cancels / closes. (When nothing is open, Q is sprint/dash: see MovementController.)
 
 local Players = game:GetService("Players")
@@ -206,6 +207,7 @@ sellBtn.Activated:Connect(function() doAction("Sell") end)
 -- ===== PLACEMENT GHOST =====
 local selected = nil
 local selectedRange = 0
+local refreshHotbarHighlight -- defined in the HOTBAR section
 
 local ghost = Instance.new("Part")
 ghost.Shape = Enum.PartType.Cylinder
@@ -225,6 +227,7 @@ local function selectUnit(name)
 	else
 		ghost.Parent = nil
 	end
+	refreshHotbarHighlight()
 end
 
 local rayParams = RaycastParams.new()
@@ -253,8 +256,31 @@ RunService.RenderStepped:Connect(function()
 	end
 end)
 
+-- Number keys 1-6 -> hotbar slots 1-6
+local SLOT_KEYS = {
+	[Enum.KeyCode.One] = 1, [Enum.KeyCode.Two] = 2, [Enum.KeyCode.Three] = 3,
+	[Enum.KeyCode.Four] = 4, [Enum.KeyCode.Five] = 5, [Enum.KeyCode.Six] = 6,
+	[Enum.KeyCode.KeypadOne] = 1, [Enum.KeyCode.KeypadTwo] = 2, [Enum.KeyCode.KeypadThree] = 3,
+	[Enum.KeyCode.KeypadFour] = 4, [Enum.KeyCode.KeypadFive] = 5, [Enum.KeyCode.KeypadSix] = 6,
+}
+local hotbarNames = {} -- unit name in each hotbar slot, filled by rebuildHotbar
+
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
+
+	local slot = SLOT_KEYS[input.KeyCode]
+	if slot then
+		if player:GetAttribute("InMatch") ~= true then return end
+		local name = hotbarNames[slot]
+		if not name then
+			showToast("No unit in slot " .. slot .. ".")
+		elseif selected == name then
+			selectUnit(nil) -- same key again puts it away
+		else
+			selectUnit(name)
+		end
+		return
+	end
 
 	if input.KeyCode == Enum.KeyCode.Q or input.UserInputType == Enum.UserInputType.MouseButton2 then
 		-- Tell MovementController this Q press was a cancel, not a dash
@@ -294,6 +320,15 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 -- ===== HOTBAR =====
+local hotbarButtons = {} -- [unit name] = its hotbar button
+
+-- Outlines the hotbar slot of the unit you're currently placing
+function refreshHotbarHighlight()
+	for name, b in pairs(hotbarButtons) do
+		b.UIStroke.Enabled = name == selected
+	end
+end
+
 local function rebuildHotbar()
 	for _, c in ipairs(hotbar:GetChildren()) do
 		if c:IsA("TextButton") then c:Destroy() end
@@ -311,6 +346,9 @@ local function rebuildHotbar()
 		return a < b
 	end)
 
+	hotbarNames = names
+	table.clear(hotbarButtons)
+
 	for i, name in ipairs(names) do
 		local stats = UnitData.GetStats(name)
 		local b = Instance.new("TextButton")
@@ -322,16 +360,31 @@ local function rebuildHotbar()
 		b.Font = Enum.Font.GothamBold
 		b.TextSize = 14
 		b.TextWrapped = true
-		b.Text = string.format("%s\n$%d", name, stats.Cost)
+		b.Text = string.format("[%d] %s\n$%d", i, name, stats.Cost)
 		b.Parent = hotbar
 		Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+		local stroke = Instance.new("UIStroke")
+		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		stroke.Thickness = 3
+		stroke.Color = Color3.new(1, 1, 1)
+		stroke.Enabled = false
+		stroke.Parent = b
+		hotbarButtons[name] = b
 		b.Activated:Connect(function()
 			selectUnit(name)
 		end)
 	end
 end
 rebuildHotbar()
-player:GetAttributeChangedSignal("Equipped"):Connect(rebuildHotbar)
+refreshHotbarHighlight()
+player:GetAttributeChangedSignal("Equipped"):Connect(function()
+	rebuildHotbar()
+	if selected and not hotbarButtons[selected] then
+		selectUnit(nil) -- the unit you were placing left your team
+	else
+		refreshHotbarHighlight()
+	end
+end)
 
 -- ===== LOBBY vs MATCH =====
 -- The HUD and hotbar only show while you're in a match
