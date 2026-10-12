@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: placed units are now character models (see UnitModels)
---  that face the path, turn toward their target and grow a little with each upgrade)
+-- (replaces the earlier version: adds match speed - 1x, 1.5x, and 2x for owners of the
+--  2x Speed game pass - picked with the speed buttons in the match HUD, see SpeedUI)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -10,6 +10,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local UnitModels = require(ReplicatedStorage:WaitForChild("UnitModels"))
@@ -42,6 +43,13 @@ local UPGRADE_COST_MULT = 0.75 -- upgrade cost = unit cost * this * current leve
 local SELL_REFUND = 0.6        -- fraction of total cash invested that you get back
 local ENEMY_SPEED_MULT = 2     -- the map is long, so enemies move faster
 local PATH_CLEARANCE = 4.5     -- how close to the path's center line a unit may be placed
+
+-- Match speed. 1x and 1.5x are free; 2x needs the 2x Speed game pass. Make the pass in the
+-- Creator Dashboard (your experience > Monetization > Passes) and paste its ID here.
+-- While the ID is 0 the 2x button just says it isn't available yet.
+local SPEED_2X_GAMEPASS_ID = 0
+local FREE_2X_IN_STUDIO = true -- lets you test 2x in Studio without buying the pass
+local SPEEDS = { [1] = true, [1.5] = true, [2] = true }
 
 -- Enemy types. Health/speed/reward are multipliers on the wave's base values.
 local ENEMY_TYPES = {
@@ -101,7 +109,8 @@ local function createArena(id)
 		State = "Waiting", -- Waiting, Intermission, Playing, Over
 		Running = false,
 		Countdown = nil,
-		Attrs = { BaseHealth = BASE_HEALTH, Wave = 0, MaxWave = MAX_WAVE, MatchStatus = "In lobby" },
+		Clock = 0,         -- match time, runs faster at higher speeds (unit cooldowns use it)
+		Attrs = { BaseHealth = BASE_HEALTH, Wave = 0, MaxWave = MAX_WAVE, MatchStatus = "In lobby", MatchSpeed = 1 },
 	}
 end
 
@@ -122,6 +131,10 @@ local function setMatchAttr(arena, name, value)
 	for p in pairs(arena.Players) do
 		p:SetAttribute(name, value)
 	end
+end
+
+local function speedOf(arena)
+	return arena.Attrs.MatchSpeed
 end
 
 local function participantsLeft(arena)
@@ -247,6 +260,8 @@ end
 -- ===== SIMULATION (runs every arena) =====
 local function stepArena(arena, dt)
 	if arena.State ~= "Playing" then return end
+	dt *= speedOf(arena) -- at 2x speed everything moves and attacks twice as fast
+	arena.Clock += dt
 	local waypoints = arena.Waypoints
 	local enemies = arena.Enemies
 
@@ -273,7 +288,7 @@ local function stepArena(arena, dt)
 	end
 
 	-- Unit attacks (target the enemy furthest along the path)
-	local now = os.clock()
+	local now = arena.Clock
 	for _, u in ipairs(arena.Units) do
 		if now - u.LastAttack >= u.Stats.Cooldown then
 			local best, bestProgress
@@ -482,7 +497,7 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 		HighGround = highGround,
 		Level = 1,
 		Invested = stats.Cost,
-		LastAttack = 0,
+		LastAttack = -math.huge, -- ready to attack straight away
 	}
 	table.insert(arena.Units, u)
 	refreshUnit(u)
@@ -533,9 +548,59 @@ actionRemote.OnServerInvoke = function(player, action, part)
 	return { Success = false, Error = "Unknown action." }
 end
 
+-- ===== MATCH SPEED =====
+local function checkSpeedPass(player)
+	if FREE_2X_IN_STUDIO and RunService:IsStudio() then
+		player:SetAttribute("Owns2xSpeed", true)
+		return
+	end
+	if SPEED_2X_GAMEPASS_ID == 0 then
+		player:SetAttribute("Owns2xSpeed", false)
+		return
+	end
+	local ok, owns = pcall(MarketplaceService.UserOwnsGamePassAsync, MarketplaceService, player.UserId, SPEED_2X_GAMEPASS_ID)
+	player:SetAttribute("Owns2xSpeed", ok and owns == true)
+end
+
+-- Bought the pass mid-game: unlock it now and switch their match to 2x
+MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, passId, purchased)
+	if purchased and passId == SPEED_2X_GAMEPASS_ID then
+		player:SetAttribute("Owns2xSpeed", true)
+		local arena = playerArena[player]
+		if arena and arena.State ~= "Over" then
+			setMatchAttr(arena, "MatchSpeed", 2)
+		end
+	end
+end)
+
+-- Anyone on the team can change the speed; it applies to the whole team's match
+local speedRemote = Instance.new("RemoteFunction")
+speedRemote.Name = "SetSpeedRemote"
+speedRemote.Parent = ReplicatedStorage
+
+speedRemote.OnServerInvoke = function(player, speed)
+	if typeof(speed) ~= "number" or not SPEEDS[speed] then
+		return { Success = false, Error = "Bad speed." }
+	end
+	local arena = playerArena[player]
+	if not arena then
+		return { Success = false, Error = "You're not in a match." }
+	end
+	if speed == 2 and player:GetAttribute("Owns2xSpeed") ~= true then
+		if SPEED_2X_GAMEPASS_ID == 0 then
+			return { Success = false, Error = "2x speed isn't available yet." }
+		end
+		MarketplaceService:PromptGamePassPurchase(player, SPEED_2X_GAMEPASS_ID)
+		return { Success = false, Prompted = true }
+	end
+	setMatchAttr(arena, "MatchSpeed", speed)
+	return { Success = true }
+end
+
 -- ===== PLAYERS =====
 local function onPlayerAdded(player)
 	player:SetAttribute("InMatch", false)
+	task.spawn(checkSpeedPass, player)
 	player.CharacterAdded:Connect(function(char)
 		-- If you die mid-match you respawn in the lobby, so send you back to your arena
 		local arena = playerArena[player]
@@ -574,6 +639,7 @@ local function clearBoard(arena)
 
 	setMatchAttr(arena, "BaseHealth", BASE_HEALTH)
 	setMatchAttr(arena, "Wave", 0)
+	setMatchAttr(arena, "MatchSpeed", 1)
 end
 
 -- Sends the team back to the lobby and resets the arena
@@ -610,7 +676,7 @@ local function runMatch(arena, participants)
 		arena.State = "Intermission"
 		for t = INTERMISSION, 1, -1 do
 			setMatchAttr(arena, "MatchStatus", string.format("Wave %d%s starts in %d", wave, isBoss and " (BOSS)" or "", t))
-			task.wait(1)
+			task.wait(1 / speedOf(arena))
 			if not participantsLeft(arena) then
 				endMatch(arena)
 				return
@@ -624,7 +690,7 @@ local function runMatch(arena, participants)
 		for _, typeName in ipairs(buildWave(wave)) do
 			if arena.State ~= "Playing" or not participantsLeft(arena) then break end
 			spawnEnemy(arena, wave, typeName)
-			task.wait(SPAWN_INTERVAL)
+			task.wait(SPAWN_INTERVAL / speedOf(arena))
 		end
 		while arena.State == "Playing" and #arena.Enemies > 0 and participantsLeft(arena) do
 			task.wait(0.25)
