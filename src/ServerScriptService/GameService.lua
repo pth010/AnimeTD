@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: FIVE arenas run independent matches at the same time,
---  one per team pad in the lobby)
+-- (replaces the earlier version: placed units are now character models (see UnitModels)
+--  that face the path, turn toward their target and grow a little with each upgrade)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -12,6 +12,7 @@ local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
+local UnitModels = require(ReplicatedStorage:WaitForChild("UnitModels"))
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
 
 local arenasFolder = workspace:WaitForChild("Arenas")
@@ -291,6 +292,13 @@ local function stepArena(arena, dt)
 			end
 			if best then
 				u.LastAttack = now
+				-- turn to face the target (around the vertical axis only)
+				local pivot = u.Model:GetPivot()
+				local t = best.Part.Position
+				local look = Vector3.new(t.X, pivot.Y, t.Z)
+				if (look - pivot.Position).Magnitude > 0.1 then
+					u.Model:PivotTo(CFrame.lookAt(pivot.Position, look))
+				end
 				drawBeam(arena, u.Part.Position, best.Part.Position, u.Part.Color)
 				damageEnemy(best, u.Stats.Damage, u.Owner)
 			end
@@ -353,9 +361,10 @@ local function findUnit(arena, part)
 	return nil, nil
 end
 
--- Distance (on the ground plane) from a point to the nearest piece of the enemy path
+-- Distance (on the ground plane) from a point to the nearest piece of the enemy path,
+-- plus that nearest point's X and Z
 local function distanceToPath(arena, spot)
-	local best = math.huge
+	local best, bestX, bestZ = math.huge, spot.X, spot.Z
 	local wps = arena.Waypoints
 	for i = 1, #wps - 1 do
 		local a, b = wps[i].Position, wps[i + 1].Position
@@ -367,9 +376,9 @@ local function distanceToPath(arena, spot)
 		end
 		local cx, cz = a.X + abx * t, a.Z + abz * t
 		local d = math.sqrt((spot.X - cx) ^ 2 + (spot.Z - cz) ^ 2)
-		if d < best then best = d end
+		if d < best then best, bestX, bestZ = d, cx, cz end
 	end
-	return best
+	return best, bestX, bestZ
 end
 
 local placeRemote = Instance.new("RemoteFunction")
@@ -440,17 +449,32 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 
 	addCash(player, -stats.Cost)
 
+	-- An invisible hitbox you click on (it holds the unit's info), with the model inside it
 	local part = Instance.new("Part")
 	part.Name = unitName
-	part.Size = Vector3.new(2, 4, 2)
-	part.Color = UnitData.RarityColor[UnitData.UnitRarity[unitName]]
+	part.Size = Vector3.new(2.6, 5.6, 2.6)
+	part.Color = UnitData.RarityColor[UnitData.UnitRarity[unitName]] -- attack beam color
+	part.Transparency = 1
 	part.Anchored = true
-	part.Position = spot + Vector3.new(0, 2, 0)
-	local label = makeNameTag(part, unitName, 3.5)
+	part.CanCollide = false
+	part.Position = spot + Vector3.new(0, 2.8, 0)
+	local label = makeNameTag(part, unitName, 3.6)
+
+	-- Start out facing the nearest bit of path
+	local model = UnitModels.Build(unitName)
+	local _, pathX, pathZ = distanceToPath(arena, spot)
+	local face = Vector3.new(pathX, spot.Y, pathZ)
+	if (face - spot).Magnitude > 0.1 then
+		model:PivotTo(CFrame.lookAt(spot, face))
+	else
+		model:PivotTo(CFrame.new(spot))
+	end
+	model.Parent = part
 	part.Parent = arena.UnitFolder
 
 	local u = {
 		Part = part,
+		Model = model,
 		Label = label,
 		Owner = player,
 		BaseStats = stats,
@@ -495,6 +519,7 @@ actionRemote.OnServerInvoke = function(player, action, part)
 		u.Level += 1
 		u.Invested += cost
 		u.Stats = scaledStats(u.BaseStats, u.Level, u.HighGround)
+		u.Model:ScaleTo(1 + 0.06 * (u.Level - 1)) -- a little bigger every level
 		refreshUnit(u)
 		return { Success = true }
 

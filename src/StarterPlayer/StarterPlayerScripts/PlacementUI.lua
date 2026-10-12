@@ -180,7 +180,8 @@ local function refreshPanel()
 	sellBtn.Text = string.format("Sell (+$%d)", sellValue)
 
 	rangeRing.Size = Vector3.new(0.2, range * 2, range * 2)
-	rangeRing.CFrame = CFrame.new(inspected.Position - Vector3.new(0, 1.9, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	-- on the ground under the unit's hitbox
+	rangeRing.CFrame = CFrame.new(inspected.Position - Vector3.new(0, inspected.Size.Y / 2 - 0.1, 0)) * CFrame.Angles(0, 0, math.rad(90))
 end
 
 local function openPanel(part)
