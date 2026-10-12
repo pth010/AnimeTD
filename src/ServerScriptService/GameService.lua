@@ -1,7 +1,9 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: every enemy's health bar shows its HP number, not just the boss's)
+-- (replaces the earlier version: matches are played on a level picked from the level select
+--  (see LevelData) - waves, enemy strength, start cash and rewards come from the level, and
+--  the first player on a team pad (the host) chooses it)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -14,6 +16,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local UnitModels = require(ReplicatedStorage:WaitForChild("UnitModels"))
 local EnemyModels = require(ReplicatedStorage:WaitForChild("EnemyModels"))
+local LevelData = require(ReplicatedStorage:WaitForChild("LevelData"))
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
 
 local arenasFolder = workspace:WaitForChild("Arenas")
@@ -27,17 +30,13 @@ local MAX_PLAYERS = 4          -- players per team
 local QUEUE_COUNTDOWN = 10     -- seconds from first player stepping on a pad
 local FULL_COUNTDOWN = 3       -- shortened countdown when a pad is full
 
-local MAX_WAVE = 10
-local START_CASH = 500
+-- Waves, start cash, boss timing, enemy strength and win rewards are set per level in LevelData
 local BASE_HEALTH = 20
 local INTERMISSION = 10
 local SPAWN_INTERVAL = 1
 local MIN_UNIT_SPACING = 4
 local MAX_UNITS_PER_PLAYER = 12 -- total units per player, on top of the per-unit limits in UnitData
 local WAVE_GEMS = 20        -- gems for every player when a wave is cleared (set to 0 to turn off)
-local WIN_GEMS = 75         -- gems for every player when the team wins the match
-local WIN_GOLD = 375        -- gold for every player when the team wins the match
-local BOSS_EVERY = 5        -- a boss ends every 5th wave
 local RESULTS_TIME = 30     -- seconds on the victory/defeat screen before going back to the lobby
 
 local UPGRADE_MAX_LEVEL = 5
@@ -115,7 +114,10 @@ local function createArena(id)
 		Clock = 0,         -- match time, runs faster at higher speeds (unit cooldowns use it)
 		Stats = {},        -- [userId] = { Name, Damage, Kills, Gems } for the results screen
 		Votes = {},        -- [player] = "Again" on the results screen
-		Attrs = { BaseHealth = BASE_HEALTH, Wave = 0, MaxWave = MAX_WAVE, MatchStatus = "In lobby", MatchSpeed = 1 },
+		Host = nil,        -- the first player on the pad: they pick the level
+		LevelId = nil,     -- the level picked for the next match
+		Level = nil,       -- the level being played right now
+		Attrs = { BaseHealth = BASE_HEALTH, Wave = 0, MaxWave = LevelData.Levels[1].Waves, MatchStatus = "In lobby", MatchSpeed = 1 },
 	}
 end
 
@@ -253,7 +255,7 @@ end
 
 -- ===== ENEMIES =====
 -- Which enemies appear in a wave, in a shuffled spawn order
-local function buildWave(wave)
+local function buildWave(wave, bossEvery)
 	local list = {}
 	for _ = 1, 4 + wave * 2 do table.insert(list, "Normal") end
 	if wave >= 3 then
@@ -268,7 +270,7 @@ local function buildWave(wave)
 		list[i], list[j] = list[j], list[i]
 	end
 
-	if wave % BOSS_EVERY == 0 then
+	if wave % bossEvery == 0 then
 		table.insert(list, "Boss") -- the boss always comes last
 	end
 	return list
@@ -283,7 +285,8 @@ end
 
 local function spawnEnemy(arena, wave, typeName)
 	local def = ENEMY_TYPES[typeName]
-	local maxHp = math.floor((50 + wave * 25) * def.HealthMult)
+	local level = arena.Level
+	local maxHp = math.floor((50 + wave * 25) * def.HealthMult * level.HealthMult)
 	local offset = Vector3.new(0, def.Size.Y / 2, 0)
 	local start = arena.Waypoints[1].Position + offset
 	local face = facing(arena.Waypoints[2].Position - arena.Waypoints[1].Position) or CFrame.new()
@@ -314,7 +317,7 @@ local function spawnEnemy(arena, wave, typeName)
 		Phase = math.random() * math.pi * 2,
 		Offset = offset,
 		Health = maxHp,
-		Speed = (6 + wave * 0.25) * def.SpeedMult * ENEMY_SPEED_MULT,
+		Speed = (6 + wave * 0.25) * def.SpeedMult * level.SpeedMult * ENEMY_SPEED_MULT,
 		Index = 2, -- the waypoint it is currently heading toward
 		Reward = math.floor((15 + wave * 2) * def.RewardMult),
 		BaseDamage = def.BaseDamage,
@@ -839,10 +842,14 @@ local function endMatch(arena)
 	arena.Attrs.MatchStatus = "In lobby"
 end
 
--- Plays one match from wave 1. Returns true (won), false (base destroyed) or nil (everyone left).
+-- Plays one match of arena.Level from wave 1.
+-- Returns true (won), false (base destroyed) or nil (everyone left).
 local function playMatch(arena, participants)
+	local level = arena.Level
 	clearBoard(arena)
 	table.clear(arena.Stats)
+	setMatchAttr(arena, "MaxWave", level.Waves)
+	setMatchAttr(arena, "LevelName", level.Name)
 	for _, p in ipairs(participants) do
 		arena.Players[p] = true
 		playerArena[p] = arena
@@ -852,12 +859,12 @@ local function playMatch(arena, participants)
 		end
 		p:SetAttribute("ArenaId", arena.Id)
 		p:SetAttribute("InMatch", true)
-		p:SetAttribute("Cash", START_CASH)
+		p:SetAttribute("Cash", level.StartCash)
 		teleportTo(p, arena.Spawn, 6)
 	end
 
-	for wave = 1, MAX_WAVE do
-		local isBoss = wave % BOSS_EVERY == 0
+	for wave = 1, level.Waves do
+		local isBoss = wave % level.BossEvery == 0
 
 		arena.State = "Intermission"
 		for t = INTERMISSION, 1, -1 do
@@ -870,7 +877,7 @@ local function playMatch(arena, participants)
 		setMatchAttr(arena, "MatchStatus", isBoss and ("Wave " .. wave .. " - BOSS!") or ("Wave " .. wave))
 		arena.State = "Playing"
 
-		for _, typeName in ipairs(buildWave(wave)) do
+		for _, typeName in ipairs(buildWave(wave, level.BossEvery)) do
 			if arena.State ~= "Playing" or not participantsLeft(arena) then break end
 			spawnEnemy(arena, wave, typeName)
 			task.wait(SPAWN_INTERVAL / speedOf(arena))
@@ -891,9 +898,10 @@ local function playMatch(arena, participants)
 
 	arena.State = "Over"
 	for p in pairs(arena.Players) do
-		PlayerData.AddGold(p, WIN_GOLD)
-		PlayerData.AddGems(p, WIN_GEMS)
-		statsFor(arena, p).Gems += WIN_GEMS
+		PlayerData.AddGold(p, level.WinGold)
+		PlayerData.AddGems(p, level.WinGems)
+		PlayerData.MarkCleared(p, level.Id) -- unlocks the next level
+		statsFor(arena, p).Gems += level.WinGems
 	end
 	return true
 end
@@ -922,8 +930,9 @@ local function showResults(arena, victory)
 		resultsEvent:FireClient(p, {
 			Victory = victory,
 			Wave = arena.Attrs.Wave,
-			MaxWave = MAX_WAVE,
-			Gold = victory and WIN_GOLD or 0,
+			MaxWave = arena.Level.Waves,
+			LevelName = arena.Level.Name,
+			Gold = victory and arena.Level.WinGold or 0,
 			Gems = mine.Gems,
 			TotalDamage = math.floor(totalDamage),
 			Players = rows,
@@ -975,8 +984,9 @@ resultsEvent.OnServerEvent:Connect(function(player, choice)
 	setMatchAttr(arena, "ResultsReady", ready)
 end)
 
--- Runs matches back to back for as long as the team keeps choosing Play Again
-local function runMatch(arena, participants)
+-- Runs matches of one level back to back for as long as the team keeps choosing Play Again
+local function runMatch(arena, participants, level)
+	arena.Level = level
 	while #participants > 0 do
 		local victory = playMatch(arena, participants)
 		if victory == nil then break end -- everyone left
@@ -1012,40 +1022,121 @@ local function playersOnPad(arena)
 	return found, sawEmpty
 end
 
+-- What the level-select window on the pad needs to know (read by LevelSelectUI)
+local function publishPad(arena, countdown)
+	local pad = arena.Pad
+	pad:SetAttribute("Host", arena.Host and arena.Host.UserId or 0)
+	pad:SetAttribute("HostName", arena.Host and arena.Host.DisplayName or "")
+	pad:SetAttribute("Level", arena.LevelId or 0)
+	pad:SetAttribute("Countdown", countdown or -1)
+	pad:SetAttribute("Running", arena.Running)
+end
+
 local function updateQueue(arena, dt)
 	local queued, sawEmpty = playersOnPad(arena)
 
 	if arena.Running then
 		arena.Label.Text = string.format("Match in progress\n%d waiting", #queued)
-	elseif #queued == 0 then
+		publishPad(arena)
+		return
+	end
+
+	if #queued == 0 then
+		arena.Host = nil
+		arena.LevelId = nil
 		arena.Countdown = nil
 		if sawEmpty then
-			arena.Label.Text = "Equip a unit first!\n(summon at the altar)"
+			arena.Label.Text = "Equip a unit first!\n(summon at the fountain)"
 		else
 			arena.Label.Text = string.format("Step here to queue\n0/%d", MAX_PLAYERS)
 		end
-	else
-		local countdown = arena.Countdown or QUEUE_COUNTDOWN
-		if #queued >= MAX_PLAYERS and countdown > FULL_COUNTDOWN then
-			countdown = FULL_COUNTDOWN
-		end
-		countdown -= dt
-		arena.Countdown = countdown
-		arena.Label.Text = string.format("Starting in %d\n%d/%d players", math.max(0, math.ceil(countdown)), #queued, MAX_PLAYERS)
+		publishPad(arena)
+		return
+	end
 
-		if countdown <= 0 then
-			arena.Countdown = nil
-			arena.Running = true
-			task.spawn(function()
-				local ok, err = pcall(runMatch, arena, queued)
-				if not ok then
-					warn("[GameService] arena " .. arena.Id .. " error:", err)
-					endMatch(arena)
-				end
-				arena.Running = false
-			end)
+	-- The first player on the pad is the host. If they step off, the next player takes over
+	-- and picks again.
+	if not arena.Host or not table.find(queued, arena.Host) then
+		arena.Host = queued[1]
+		arena.LevelId = nil
+		arena.Countdown = nil
+	end
+
+	local level = arena.LevelId and LevelData.Get(arena.LevelId)
+	if not level then
+		arena.Label.Text = string.format("%s is choosing a level\n%d/%d players", arena.Host.DisplayName, #queued, MAX_PLAYERS)
+		publishPad(arena)
+		return
+	end
+
+	local countdown = arena.Countdown or QUEUE_COUNTDOWN
+	if #queued >= MAX_PLAYERS and countdown > FULL_COUNTDOWN then
+		countdown = FULL_COUNTDOWN
+	end
+	countdown -= dt
+	arena.Countdown = countdown
+	local secondsLeft = math.max(0, math.ceil(countdown))
+	arena.Label.Text = string.format("%s (%s)\nStarting in %d - %d/%d", level.Name, level.Difficulty, secondsLeft, #queued, MAX_PLAYERS)
+	publishPad(arena, secondsLeft)
+
+	if countdown <= 0 then
+		arena.Countdown = nil
+		arena.Running = true
+		arena.Host = nil
+		arena.LevelId = nil
+		publishPad(arena)
+		task.spawn(function()
+			local ok, err = pcall(runMatch, arena, queued, level)
+			if not ok then
+				warn("[GameService] arena " .. arena.Id .. " error:", err)
+				endMatch(arena)
+			end
+			arena.Running = false
+		end)
+	end
+end
+
+-- The host's choices in the level-select window: ("Select", levelId) or ("Start")
+local levelRemote = Instance.new("RemoteFunction")
+levelRemote.Name = "LevelSelectRemote"
+levelRemote.Parent = ReplicatedStorage
+
+levelRemote.OnServerInvoke = function(player, action, levelId)
+	local arena
+	for _, a in ipairs(arenas) do
+		if a.Host == player and not a.Running then
+			arena = a
+			break
 		end
 	end
+	if not arena then
+		return { Success = false, Error = "Only the first player on the pad picks the level." }
+	end
+
+	if action == "Select" then
+		local level = typeof(levelId) == "number" and LevelData.Get(levelId)
+		if not level then
+			return { Success = false, Error = "Unknown level." }
+		end
+		local cleared = {}
+		if level.Requires then
+			cleared[level.Requires] = PlayerData.HasCleared(player, level.Requires)
+		end
+		if not LevelData.IsUnlocked(level, cleared) then
+			return { Success = false, Error = "Beat " .. LevelData.Get(level.Requires).Name .. " first." }
+		end
+		arena.LevelId = level.Id
+		arena.Countdown = nil -- restart the countdown for the new pick
+		return { Success = true }
+
+	elseif action == "Start" then
+		if not arena.LevelId then
+			return { Success = false, Error = "Pick a level first." }
+		end
+		arena.Countdown = math.min(arena.Countdown or QUEUE_COUNTDOWN, FULL_COUNTDOWN)
+		return { Success = true }
+	end
+	return { Success = false, Error = "Unknown action." }
 end
 
 while true do

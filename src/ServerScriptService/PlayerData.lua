@@ -1,7 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: ModuleScript
 -- NAME: PlayerData
--- (replaces the earlier version: auto-equip always puts your cash units on the team)
+-- (replaces the earlier version: remembers which levels each player has beaten, which
+--  unlocks the next level in the level select)
 --
 -- Single source of truth for each player's gems, gold, pity, units, locks, team and settings.
 -- Saving needs a published place (File > Publish to Roblox). To test in Studio, also enable
@@ -46,6 +47,7 @@ PlayerData.Profiles = {}
 --   Equipped   = ordered list of unit names on your team (max UnitData.TeamSize)
 --   AutoEquip  = true: the team is always your best units by damage per second
 --   AutoDelete [rarityName] = true: newly summoned units of that rarity are deleted on arrival
+--   Cleared    [levelId] = true: levels this player has beaten (see LevelData)
 -- Units = Obtained - Deleted. Keeping both running totals lets two servers merge
 -- their saves safely: taking the higher of each total can never resurrect a deleted
 -- unit or lose a new one.
@@ -143,6 +145,13 @@ function PlayerData.Sync(player)
 	player:SetAttribute("Equipped", table.concat(profile.Equipped, ",")) -- the match hotbar
 	player:SetAttribute("AutoEquip", profile.AutoEquip)
 	player:SetAttribute("AutoDelete", table.concat(autoDelete, ","))    -- "Common,Rare"
+
+	local cleared = {}
+	for id in pairs(profile.Cleared) do
+		table.insert(cleared, id)
+	end
+	table.sort(cleared)
+	player:SetAttribute("ClearedLevels", table.concat(cleared, ","))    -- "1,2"
 end
 
 local function loadFromStore(userId)
@@ -177,6 +186,7 @@ function PlayerData.Load(player)
 		Equipped = {},
 		AutoEquip = true,
 		AutoDelete = {},
+		Cleared = {},
 		Busy = false,
 		SavePending = false,
 		CanSave = ok, -- never save over a profile we failed to load
@@ -216,6 +226,13 @@ function PlayerData.Load(player)
 			for _, name in ipairs(saved.Equipped) do
 				if type(name) == "string" then
 					table.insert(profile.Equipped, name)
+				end
+			end
+		end
+		if type(saved.Cleared) == "table" then
+			for _, id in ipairs(saved.Cleared) do
+				if tonumber(id) then
+					profile.Cleared[tonumber(id)] = true
 				end
 			end
 		end
@@ -265,6 +282,22 @@ function PlayerData.Save(player)
 				end
 			end
 
+			-- beaten levels: keep every level either server has seen beaten
+			local cleared = {}
+			for id in pairs(profile.Cleared) do
+				cleared[id] = true
+			end
+			if type(old) == "table" and type(old.Cleared) == "table" then
+				for _, id in ipairs(old.Cleared) do
+					if tonumber(id) then cleared[tonumber(id)] = true end
+				end
+			end
+			local clearedList = {}
+			for id in pairs(cleared) do
+				table.insert(clearedList, id)
+			end
+			table.sort(clearedList)
+
 			return {
 				Gems = profile.Gems,
 				Gold = profile.Gold,
@@ -276,6 +309,7 @@ function PlayerData.Save(player)
 				Equipped = equipped,
 				AutoEquip = profile.AutoEquip,
 				AutoDelete = table.clone(profile.AutoDelete),
+				Cleared = clearedList,
 			}
 		end)
 	end)
@@ -319,6 +353,20 @@ function PlayerData.AddGold(player, amount)
 	profile.Gold += amount
 	PlayerData.Sync(player)
 	PlayerData.RequestSave(player)
+end
+
+-- Records that the player beat a level (unlocks the next one)
+function PlayerData.MarkCleared(player, levelId)
+	local profile = PlayerData.Profiles[player]
+	if not profile or profile.Cleared[levelId] then return end
+	profile.Cleared[levelId] = true
+	PlayerData.Sync(player)
+	PlayerData.RequestSave(player)
+end
+
+function PlayerData.HasCleared(player, levelId)
+	local profile = PlayerData.Profiles[player]
+	return profile ~= nil and profile.Cleared[levelId] == true
 end
 
 -- Gives one copy of a unit. If you've turned on auto-delete for its rarity (and the unit
