@@ -1,7 +1,7 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: PlacementUI
--- (replaces the earlier version: costs, range and the upgrade panel include unit traits)
+-- (replaces the earlier version: range previews include unit levels and evolution stars)
 -- HUD (wave, base HP, cash), unit hotbar, click-to-place with a range preview.
 -- Controls: click a unit in the hotbar, then click a green plot to place it.
 -- Click a placed unit (with nothing selected) to upgrade or sell it.
@@ -16,6 +16,7 @@ local RunService = game:GetService("RunService")
 
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
+local ProgressData = require(ReplicatedStorage:WaitForChild("ProgressData"))
 local placeRemote = ReplicatedStorage:WaitForChild("PlaceUnitRemote")
 local actionRemote = ReplicatedStorage:WaitForChild("UnitActionRemote")
 local placeable = nil   -- this match's PlaceableArea (set when a match starts)
@@ -23,10 +24,11 @@ local unitsFolder = nil -- this match's Units folder
 
 local player = Players.LocalPlayer
 
--- A unit's stats with your trait on it applied (cost, range...)
+-- A unit's stats with your trait, level and stars applied (cost, range...)
 local function myStats(name)
 	local traits = TraitData.Parse(player:GetAttribute("UnitTraits"))
-	return TraitData.StatsFor(name, traits[name])
+	local progress = ProgressData.Parse(player:GetAttribute("UnitProgress"))[name]
+	return ProgressData.Apply(TraitData.StatsFor(name, traits[name]), progress and progress.XP, progress and progress.Stars)
 end
 local camera = workspace.CurrentCamera
 
@@ -450,6 +452,7 @@ local function onTeamChanged()
 end
 player:GetAttributeChangedSignal("Equipped"):Connect(onTeamChanged)
 player:GetAttributeChangedSignal("UnitTraits"):Connect(onTeamChanged) -- costs change with traits
+player:GetAttributeChangedSignal("UnitProgress"):Connect(onTeamChanged)
 
 -- ===== LOBBY vs MATCH =====
 -- The HUD and hotbar only show while you're in a match

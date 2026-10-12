@@ -1,7 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: ModuleScript
 -- NAME: PlayerData
--- (replaces the earlier version: adds unit traits, rolled with Gold in the inventory)
+-- (replaces the earlier version: adds unit levels from fusing, and evolution stars)
 --
 -- Single source of truth for each player's gems, gold, pity, units, locks, team and settings.
 -- Saving needs a published place (File > Publish to Roblox). To test in Studio, also enable
@@ -15,6 +15,7 @@ local DataStoreService = game:GetService("DataStoreService")
 
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
+local ProgressData = require(ReplicatedStorage:WaitForChild("ProgressData"))
 
 local STORE_NAME = "AnimeTD_PlayerData_v1" -- bump the version to wipe everyone's data
 local AUTOSAVE_INTERVAL = 120
@@ -49,6 +50,8 @@ PlayerData.Profiles = {}
 --   AutoDelete [rarityName] = true: newly summoned units of that rarity are deleted on arrival
 --   Cleared    [levelId] = true: levels this player has beaten (see LevelData)
 --   Traits     [name] = trait name (see TraitData), one per unit you own
+--   XP         [name] = fusion XP (sets the unit's level, see ProgressData)
+--   Stars      [name] = evolution stars (0 to ProgressData.MaxStars)
 -- Units = Obtained - Deleted. Keeping both running totals lets two servers merge
 -- their saves safely: taking the higher of each total can never resurrect a deleted
 -- unit or lose a new one.
@@ -72,7 +75,8 @@ local function dps(profile, unitName)
 	if UnitData.IsFarm(unitName) then
 		return math.huge
 	end
-	local s = TraitData.StatsFor(unitName, profile.Traits[unitName])
+	local s = ProgressData.Apply(TraitData.StatsFor(unitName, profile.Traits[unitName]),
+		profile.XP[unitName], profile.Stars[unitName])
 	return s.Damage / s.Cooldown
 end
 
@@ -162,6 +166,16 @@ function PlayerData.Sync(player)
 	end
 	table.sort(traits)
 	player:SetAttribute("UnitTraits", table.concat(traits, ";"))        -- "Blade Novice=Lord;Frost Mage=Swift"
+
+	local progress = {}
+	for name in pairs(profile.Units) do
+		local xp, stars = profile.XP[name] or 0, profile.Stars[name] or 0
+		if xp > 0 or stars > 0 then
+			table.insert(progress, string.format("%s=%d:%d", name, xp, stars))
+		end
+	end
+	table.sort(progress)
+	player:SetAttribute("UnitProgress", table.concat(progress, ";"))    -- "Frost Mage=1200:2" (XP:stars)
 end
 
 local function loadFromStore(userId)
@@ -198,6 +212,8 @@ function PlayerData.Load(player)
 		AutoDelete = {},
 		Cleared = {},
 		Traits = {},
+		XP = {},
+		Stars = {},
 		Busy = false,
 		SavePending = false,
 		CanSave = ok, -- never save over a profile we failed to load
@@ -254,6 +270,20 @@ function PlayerData.Load(player)
 				end
 			end
 		end
+		if type(saved.XP) == "table" then
+			for name, xp in pairs(saved.XP) do
+				if profile.Units[name] and tonumber(xp) then
+					profile.XP[name] = math.clamp(math.floor(tonumber(xp)), 0, ProgressData.MaxXP())
+				end
+			end
+		end
+		if type(saved.Stars) == "table" then
+			for name, stars in pairs(saved.Stars) do
+				if profile.Units[name] and tonumber(stars) then
+					profile.Stars[name] = math.clamp(math.floor(tonumber(stars)), 0, ProgressData.MaxStars)
+				end
+			end
+		end
 	end
 
 	normalizeEquipment(profile)
@@ -282,7 +312,9 @@ function PlayerData.Save(player)
 				end
 			end
 
-			local units, locked, traits = {}, {}, {}
+			local units, locked, traits, xpOut, starsOut = {}, {}, {}, {}, {}
+			local oldXP = type(old) == "table" and type(old.XP) == "table" and old.XP or {}
+			local oldStars = type(old) == "table" and type(old.Stars) == "table" and old.Stars or {}
 			for name, got in pairs(obtained) do
 				local left = got - (deleted[name] or 0)
 				if left > 0 then
@@ -294,6 +326,8 @@ function PlayerData.Save(player)
 					traits[name] = profile.Traits[name]
 						or (type(old) == "table" and type(old.Traits) == "table" and TraitData.Get(old.Traits[name]) and old.Traits[name])
 						or nil
+					xpOut[name] = profile.XP[name] or tonumber(oldXP[name])
+					starsOut[name] = profile.Stars[name] or tonumber(oldStars[name])
 				end
 			end
 
@@ -333,6 +367,8 @@ function PlayerData.Save(player)
 				AutoDelete = table.clone(profile.AutoDelete),
 				Cleared = clearedList,
 				Traits = traits,
+				XP = xpOut,
+				Stars = starsOut,
 			}
 		end)
 	end)
@@ -425,7 +461,10 @@ function PlayerData.DeleteUnit(player, unitName, amount)
 	profile.Deleted[unitName] = (profile.Deleted[unitName] or 0) + n
 	profile.Units[unitName] = (have - n > 0) and (have - n) or nil
 	if not profile.Units[unitName] then
-		profile.Traits[unitName] = nil -- the last copy is gone, so is its trait
+		-- the last copy is gone, and its trait, level and stars with it
+		profile.Traits[unitName] = nil
+		profile.XP[unitName] = nil
+		profile.Stars[unitName] = nil
 	end
 
 	PlayerData.Refresh(player)
@@ -488,6 +527,77 @@ function PlayerData.RollTrait(player, unitName)
 	profile.Traits[unitName] = trait
 	PlayerData.Refresh(player) -- the trait can change who auto-equip picks
 	return true, nil, trait
+end
+
+-- Fuses other units into `target` for XP. feed = { [unitName] = copies }.
+-- Locked units can't be fed, and a unit can't be fed into itself (use Evolve for that).
+-- Returns ok, errorMessage, xpGained
+function PlayerData.Fuse(player, target, feed)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	if not profile.Units[target] then return false, "You don't have that unit." end
+	if type(feed) ~= "table" then return false, "Pick units to fuse." end
+
+	local maxXP = ProgressData.MaxXP()
+	local currentXP = profile.XP[target] or 0
+	if currentXP >= maxXP then return false, target .. " is already max level." end
+
+	-- check everything first, so a bad entry can't half-finish the fusion
+	local plan, gained = {}, 0
+	for name, n in pairs(feed) do
+		n = tonumber(n)
+		if type(name) ~= "string" or not n or n < 1 or n ~= math.floor(n) then
+			return false, "Bad fusion request."
+		end
+		if name == target then return false, "Use Evolve to use copies of the same unit." end
+		local have = profile.Units[name]
+		if not have or have < n then return false, "You don't have enough " .. name .. "." end
+		if profile.Locked[name] then return false, name .. " is locked." end
+		plan[name] = n
+		gained += n * ProgressData.FodderXP[UnitData.UnitRarity[name]]
+	end
+	if gained == 0 then return false, "Pick units to fuse." end
+
+	for name, n in pairs(plan) do
+		profile.Deleted[name] = (profile.Deleted[name] or 0) + n
+		local left = profile.Units[name] - n
+		profile.Units[name] = left > 0 and left or nil
+		if left <= 0 then
+			profile.Traits[name] = nil
+			profile.XP[name] = nil
+			profile.Stars[name] = nil
+		end
+	end
+	profile.XP[target] = math.min(currentXP + gained, maxXP)
+
+	PlayerData.Refresh(player)
+	return true, nil, profile.XP[target] - currentXP
+end
+
+-- Uses extra copies of a unit (and Gold) to give it one more star. Returns ok, errorMessage
+function PlayerData.Evolve(player, unitName)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	local have = profile.Units[unitName]
+	if not have then return false, "You don't have that unit." end
+
+	local stars = profile.Stars[unitName] or 0
+	local step = ProgressData.Evolutions[stars + 1]
+	if not step then return false, unitName .. " is fully evolved." end
+	if have - 1 < step.Copies then
+		return false, string.format("You need %d extra %s (you have %d extra).", step.Copies, unitName, have - 1)
+	end
+	if profile.Gold < step.Gold then
+		return false, string.format("You need %d Gold to evolve.", step.Gold)
+	end
+
+	profile.Gold -= step.Gold
+	profile.Deleted[unitName] = (profile.Deleted[unitName] or 0) + step.Copies
+	profile.Units[unitName] = have - step.Copies
+	profile.Stars[unitName] = stars + 1
+
+	PlayerData.Refresh(player)
+	return true
 end
 
 -- Sets a unit's trait directly (tester command). nil removes it.

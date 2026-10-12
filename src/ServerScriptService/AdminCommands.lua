@@ -13,6 +13,8 @@
 --   !unit frost mage 3      give yourself 3 copies (names aren't case-sensitive,
 --                           and the start of a name is enough: "!unit starfall")
 --   !trait blade novice lord  put a trait on a unit you own ("!trait blade novice none" removes it)
+--   !xp frost mage 5000     give a unit you own fusion XP (levels it up)
+--   !stars frost mage 3     set a unit's evolution stars (0-3)
 -- Negative numbers work for gems, gold and cash (e.g. "!gems -500").
 -- Results and mistakes are printed in the Output window.
 --
@@ -25,6 +27,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
+local ProgressData = require(ReplicatedStorage:WaitForChild("ProgressData"))
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
 
 local ADMINS = {
@@ -167,6 +170,34 @@ function commands.trait(player, args)
 	local ok, err = PlayerData.SetTrait(player, unitName, traitName)
 	if not ok then return err end
 	print(string.format("[AdminCommands] %s's %s now has trait %s", player.Name, unitName, traitName or "none"))
+end
+
+-- "frost mage 5000" -> unit name, number
+local function unitAndNumber(args)
+	local namePart, numberPart = string.match(args, "^(.-)%s+(%d+)$")
+	if not namePart then return nil, nil, "put a number at the end" end
+	local unitName, problem = findUnit(namePart)
+	return unitName, tonumber(numberPart), problem
+end
+
+function commands.xp(player, args)
+	local unitName, amount, problem = unitAndNumber(args)
+	if not unitName then return problem or "usage: !xp <unit> <amount>" end
+	local profile = PlayerData.Get(player)
+	if not profile then return "your data is still loading" end
+	if not profile.Units[unitName] then return "you don't own " .. unitName end
+	profile.XP[unitName] = math.min((profile.XP[unitName] or 0) + amount, ProgressData.MaxXP())
+	PlayerData.Refresh(player)
+end
+
+function commands.stars(player, args)
+	local unitName, stars, problem = unitAndNumber(args)
+	if not unitName then return problem or "usage: !stars <unit> <0-3>" end
+	local profile = PlayerData.Get(player)
+	if not profile then return "your data is still loading" end
+	if not profile.Units[unitName] then return "you don't own " .. unitName end
+	profile.Stars[unitName] = math.clamp(stars, 0, ProgressData.MaxStars)
+	PlayerData.Refresh(player)
 end
 
 local function onChatted(player, message)

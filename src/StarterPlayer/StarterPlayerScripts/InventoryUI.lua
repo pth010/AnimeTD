@@ -1,14 +1,15 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: InventoryUI
--- (replaces the earlier version: adds unit traits - each card shows its trait and has a
---  Roll button (costs Gold), and "Trait Odds" lists every trait with its chance)
+-- (replaces the earlier version: adds Fuse (feed other units in for XP / levels) and
+--  Evolve (use extra copies of the same unit for stars), see ProgressData)
 -- Lobby only. Locked units can't be deleted. Deleting asks for confirmation.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
+local ProgressData = require(ReplicatedStorage:WaitForChild("ProgressData"))
 local inventoryRemote = ReplicatedStorage:WaitForChild("InventoryRemote")
 local player = Players.LocalPlayer
 
@@ -168,7 +169,7 @@ scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 scroll.Parent = frame
 
 local grid = Instance.new("UIGridLayout")
-grid.CellSize = UDim2.fromOffset(170, 164)
+grid.CellSize = UDim2.fromOffset(170, 194)
 grid.CellPadding = UDim2.fromOffset(8, 8)
 grid.SortOrder = Enum.SortOrder.LayoutOrder
 grid.Parent = scroll
@@ -289,8 +290,11 @@ end
 
 -- Clicking Roll on a unit with a Legendary or Mythic trait asks you to click again
 local confirmRoll = nil
+-- Evolve asks you to click again too (it uses up copies and Gold)
+local confirmEvolve = nil
+local openFuse -- opens the fuse window, set further down
 
-local function makeCard(name, rarity, count, locked, equipped, autoEquipOn, order, traitName)
+local function makeCard(name, rarity, count, locked, equipped, autoEquipOn, order, traitName, progress)
 	local card = Instance.new("Frame")
 	card.LayoutOrder = order
 	card.BackgroundColor3 = rarity.Color:Lerp(Color3.new(0, 0, 0), 0.5)
@@ -304,10 +308,27 @@ local function makeCard(name, rarity, count, locked, equipped, autoEquipOn, orde
 
 	addLabel(card, name, UDim2.fromOffset(8, 6), UDim2.new(1, -50, 0, 20), 15)
 	addLabel(card, "x" .. count, UDim2.new(1, -46, 0, 6), UDim2.fromOffset(40, 20), 15, Color3.new(1, 1, 1), Enum.TextXAlignment.Right)
-	addLabel(card, locked and (rarity.Name .. "  -  LOCKED") or rarity.Name,
-		UDim2.fromOffset(8, 28), UDim2.new(1, -16, 0, 16), 12, locked and Color3.fromRGB(255, 215, 80) or rarity.Color)
+	addLabel(card, locked and (rarity.Name .. " - LOCKED") or rarity.Name,
+		UDim2.fromOffset(8, 28), UDim2.new(1, -100, 0, 16), 12, locked and Color3.fromRGB(255, 215, 80) or rarity.Color)
 
-	local s = TraitData.StatsFor(name, traitName)
+	-- level, stars and an XP bar
+	local xp, stars = progress and progress.XP or 0, progress and progress.Stars or 0
+	local level, into, need = ProgressData.LevelFromXP(xp)
+	addLabel(card, string.format("Lv%d %s", level, ProgressData.StarText(stars)),
+		UDim2.new(1, -96, 0, 28), UDim2.fromOffset(88, 16), 12, ProgressData.StarColor, Enum.TextXAlignment.Right)
+	local bar = Instance.new("Frame")
+	bar.Position = UDim2.fromOffset(8, 46)
+	bar.Size = UDim2.new(1, -16, 0, 3)
+	bar.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+	bar.BorderSizePixel = 0
+	bar.Parent = card
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.fromScale(need > 0 and into / need or 1, 1)
+	fill.BackgroundColor3 = need > 0 and Color3.fromRGB(110, 200, 255) or ProgressData.StarColor
+	fill.BorderSizePixel = 0
+	fill.Parent = bar
+
+	local s = ProgressData.Apply(TraitData.StatsFor(name, traitName), xp, stars)
 	local statLine = UnitData.IsFarm(name) and "Cash unit"
 		or string.format("DMG %d   RNG %d", math.floor(s.Damage), math.floor(s.Range))
 	addLabel(card, statLine, UDim2.fromOffset(8, 50), UDim2.new(1, -16, 0, 16), 13, Color3.fromRGB(230, 230, 240))
@@ -341,8 +362,48 @@ local function makeCard(name, rarity, count, locked, equipped, autoEquipOn, orde
 		rollBtn.BackgroundColor3 = Color3.fromRGB(200, 90, 60)
 	end
 
+	local fuseBtn = cardButton(card, level >= ProgressData.MaxLevel and "MAX LV" or "Fuse", 6,
+		level >= ProgressData.MaxLevel and Color3.fromRGB(80, 80, 90) or Color3.fromRGB(50, 140, 200), 164, 77)
+	local step = ProgressData.Evolutions[stars + 1]
+	local evolveBtn = cardButton(card, step and string.format("Evolve %d/%d", count - 1, step.Copies) or "MAX ★", 87,
+		(step and count - 1 >= step.Copies) and Color3.fromRGB(220, 160, 40) or Color3.fromRGB(80, 80, 90), 164, 77)
+	if confirmEvolve == name and step then
+		evolveBtn.Text = string.format("Sure? %dG", step.Gold)
+		evolveBtn.BackgroundColor3 = Color3.fromRGB(200, 90, 60)
+	end
+
 	lockBtn.Activated:Connect(function()
 		call("Lock", name, not locked)
+	end)
+
+	fuseBtn.Activated:Connect(function()
+		if level >= ProgressData.MaxLevel then
+			showMessage(name .. " is already max level.")
+		else
+			openFuse(name)
+		end
+	end)
+
+	evolveBtn.Activated:Connect(function()
+		if not step then
+			showMessage(name .. " is fully evolved.")
+			return
+		end
+		if count - 1 < step.Copies then
+			showMessage(string.format("Evolving needs %d extra %s and %d Gold (you have %d extra).",
+				step.Copies, name, step.Gold, count - 1))
+			return
+		end
+		if confirmEvolve ~= name then
+			confirmEvolve = name
+			evolveBtn.Text = string.format("Sure? %dG", step.Gold)
+			evolveBtn.BackgroundColor3 = Color3.fromRGB(200, 90, 60)
+			return
+		end
+		confirmEvolve = nil
+		if call("Evolve", name) then
+			showMessage(string.format("%s evolved to %s!", name, ProgressData.StarText(stars + 1)), ProgressData.StarColor)
+		end
 	end)
 
 	rollBtn.Activated:Connect(function()
@@ -455,9 +516,219 @@ end
 oddsBtn.Activated:Connect(function() odds.Visible = true end)
 oddsClose.Activated:Connect(function() odds.Visible = false end)
 
+-- ===== Fuse window =====
+-- Pick a unit's Fuse button, choose which other units to feed it, press FUSE.
+local fuseTarget = nil
+local fuseSelection = {} -- [unitName] = copies to feed
+
+local fuseWin = Instance.new("Frame")
+fuseWin.Size = UDim2.fromScale(1, 1)
+fuseWin.BackgroundColor3 = Color3.fromRGB(18, 24, 36)
+fuseWin.Active = true
+fuseWin.ZIndex = 10
+fuseWin.Visible = false
+fuseWin.Parent = frame
+Instance.new("UICorner", fuseWin).CornerRadius = UDim.new(0, 12)
+
+local fuseTitle = plainLabel(fuseWin, "", UDim2.fromOffset(0, 8), UDim2.new(1, 0, 0, 30), 22)
+local fuseInfo = plainLabel(fuseWin, "", UDim2.fromOffset(10, 38), UDim2.new(1, -20, 0, 20), 15, Color3.fromRGB(110, 200, 255))
+
+local function smallButton(parent, text, pos, size, color)
+	local b = Instance.new("TextButton")
+	b.Position = pos
+	b.Size = size
+	b.Text = text
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 13
+	b.TextColor3 = Color3.new(1, 1, 1)
+	b.BackgroundColor3 = color
+	b.Parent = parent
+	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+	return b
+end
+
+local fuseClose = smallButton(fuseWin, "X", UDim2.new(1, -40, 0, 6), UDim2.fromOffset(32, 32), Color3.fromRGB(190, 70, 70))
+fuseClose.TextSize = 16
+local addCommons = smallButton(fuseWin, "Add extra Commons", UDim2.fromOffset(10, 64), UDim2.fromOffset(160, 26), Color3.fromRGB(110, 110, 120))
+local addRares = smallButton(fuseWin, "Add extra Rares", UDim2.fromOffset(176, 64), UDim2.fromOffset(150, 26), Color3.fromRGB(60, 110, 190))
+local clearBtn = smallButton(fuseWin, "Clear", UDim2.fromOffset(332, 64), UDim2.fromOffset(80, 26), Color3.fromRGB(80, 80, 100))
+plainLabel(fuseWin, "(extra = keeps 1 copy)", UDim2.fromOffset(414, 64), UDim2.fromOffset(136, 26), 11, Color3.fromRGB(170, 170, 190)).Font = Enum.Font.Gotham
+
+local fuseList = Instance.new("ScrollingFrame")
+fuseList.Position = UDim2.fromOffset(10, 98)
+fuseList.Size = UDim2.new(1, -20, 1, -156)
+fuseList.BackgroundTransparency = 1
+fuseList.BorderSizePixel = 0
+fuseList.ScrollBarThickness = 6
+fuseList.CanvasSize = UDim2.new()
+fuseList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+fuseList.Parent = fuseWin
+local fuseLayout = Instance.new("UIListLayout")
+fuseLayout.Padding = UDim.new(0, 4)
+fuseLayout.SortOrder = Enum.SortOrder.LayoutOrder
+fuseLayout.Parent = fuseList
+
+local fuseGo = smallButton(fuseWin, "FUSE", UDim2.new(0.5, -90, 1, -50), UDim2.fromOffset(180, 40), Color3.fromRGB(50, 160, 90))
+fuseGo.TextSize = 18
+
+-- what the target would gain from the current selection
+local function selectionXP()
+	local total = 0
+	for name, n in pairs(fuseSelection) do
+		total += n * ProgressData.FodderXP[UnitData.UnitRarity[name]]
+	end
+	return total
+end
+
+local function refreshFuse()
+	if not fuseTarget then return end
+	local counts = parseCounts()
+	local locks = parseSet("UnitLocks", ";")
+	local traits = TraitData.Parse(player:GetAttribute("UnitTraits"))
+	local progress = ProgressData.Parse(player:GetAttribute("UnitProgress"))
+	if not counts[fuseTarget] then
+		fuseWin.Visible = false -- the target is gone
+		fuseTarget = nil
+		return
+	end
+
+	-- drop selections you no longer have enough of
+	for name, n in pairs(fuseSelection) do
+		local have = counts[name] or 0
+		if locks[name] or have == 0 then
+			fuseSelection[name] = nil
+		elseif n > have then
+			fuseSelection[name] = have
+		end
+	end
+
+	local xp = progress[fuseTarget] and progress[fuseTarget].XP or 0
+	local gain = selectionXP()
+	local before = ProgressData.LevelFromXP(xp)
+	local after = ProgressData.LevelFromXP(math.min(xp + gain, ProgressData.MaxXP()))
+	fuseTitle.Text = "Fuse into " .. fuseTarget
+	fuseInfo.Text = gain > 0 and string.format("Lv %d  ->  Lv %d   (+%d XP)", before, after, gain)
+		or string.format("Lv %d   -   pick units below to feed in", before)
+	fuseGo.BackgroundColor3 = gain > 0 and Color3.fromRGB(50, 160, 90) or Color3.fromRGB(80, 80, 90)
+
+	for _, c in ipairs(fuseList:GetChildren()) do
+		if c:IsA("Frame") then c:Destroy() end
+	end
+
+	local row = 0
+	for i = 1, #UnitData.Rarities do -- commons first: they're the usual food
+		local rarity = UnitData.Rarities[i]
+		local list = table.clone(UnitData.Units[rarity.Name])
+		table.sort(list)
+		for _, name in ipairs(list) do
+			local have = counts[name]
+			if have and name ~= fuseTarget then
+				row += 1
+				local picked = fuseSelection[name] or 0
+				local r = Instance.new("Frame")
+				r.LayoutOrder = row
+				r.Size = UDim2.new(1, -10, 0, 30)
+				r.BackgroundColor3 = rarity.Color:Lerp(Color3.new(0, 0, 0), picked > 0 and 0.45 or 0.75)
+				r.Parent = fuseList
+				Instance.new("UICorner", r).CornerRadius = UDim.new(0, 6)
+
+				local extra = ""
+				if traits[name] then extra ..= " [" .. traits[name] .. "]" end
+				if progress[name] and progress[name].Stars > 0 then extra ..= " " .. string.rep("★", progress[name].Stars) end
+				addLabel(r, name .. extra, UDim2.fromOffset(8, 0), UDim2.new(0, 190, 1, 0), 13, rarity.Color)
+				addLabel(r, "x" .. have, UDim2.fromOffset(200, 0), UDim2.new(0, 40, 1, 0), 13)
+				addLabel(r, "+" .. ProgressData.FodderXP[rarity.Name] .. " XP", UDim2.fromOffset(240, 0), UDim2.new(0, 80, 1, 0), 12, Color3.fromRGB(110, 200, 255))
+
+				if locks[name] then
+					addLabel(r, "LOCKED", UDim2.new(1, -90, 0, 0), UDim2.new(0, 82, 1, 0), 12, Color3.fromRGB(255, 215, 80), Enum.TextXAlignment.Right)
+				else
+					local minus = smallButton(r, "-", UDim2.new(1, -170, 0, 3), UDim2.fromOffset(26, 24), Color3.fromRGB(150, 60, 60))
+					addLabel(r, tostring(picked), UDim2.new(1, -142, 0, 0), UDim2.new(0, 34, 1, 0), 14, Color3.new(1, 1, 1), Enum.TextXAlignment.Center)
+					local plus = smallButton(r, "+", UDim2.new(1, -106, 0, 3), UDim2.fromOffset(26, 24), Color3.fromRGB(60, 150, 80))
+					local all = smallButton(r, "All", UDim2.new(1, -76, 0, 3), UDim2.fromOffset(40, 24), Color3.fromRGB(70, 90, 140))
+					local none = smallButton(r, "0", UDim2.new(1, -34, 0, 3), UDim2.fromOffset(26, 24), Color3.fromRGB(80, 80, 100))
+					minus.Activated:Connect(function()
+						fuseSelection[name] = picked > 1 and picked - 1 or nil
+						refreshFuse()
+					end)
+					plus.Activated:Connect(function()
+						fuseSelection[name] = math.min(picked + 1, have)
+						refreshFuse()
+					end)
+					all.Activated:Connect(function()
+						fuseSelection[name] = have
+						refreshFuse()
+					end)
+					none.Activated:Connect(function()
+						fuseSelection[name] = nil
+						refreshFuse()
+					end)
+				end
+			end
+		end
+	end
+	if row == 0 then
+		local l = plainLabel(fuseList, "You have no other units to fuse.", UDim2.new(), UDim2.new(1, -10, 0, 40), 15, Color3.fromRGB(170, 170, 190))
+		local holder = Instance.new("Frame")
+		holder.Size = UDim2.new(1, -10, 0, 40)
+		holder.BackgroundTransparency = 1
+		holder.Parent = fuseList
+		l.Parent = holder
+	end
+end
+
+-- adds every unlocked copy of a rarity except one of each (so you keep the unit)
+local function addExtras(rarityName)
+	local counts = parseCounts()
+	local locks = parseSet("UnitLocks", ";")
+	for _, name in ipairs(UnitData.Units[rarityName]) do
+		local have = counts[name] or 0
+		if name ~= fuseTarget and not locks[name] and have > 1 then
+			fuseSelection[name] = have - 1
+		end
+	end
+	refreshFuse()
+end
+
+addCommons.Activated:Connect(function() addExtras("Common") end)
+addRares.Activated:Connect(function() addExtras("Rare") end)
+clearBtn.Activated:Connect(function()
+	table.clear(fuseSelection)
+	refreshFuse()
+end)
+fuseClose.Activated:Connect(function()
+	fuseWin.Visible = false
+	fuseTarget = nil
+end)
+
+fuseGo.Activated:Connect(function()
+	if not fuseTarget then return end
+	if selectionXP() == 0 then
+		showMessage("Pick some units to feed in first.")
+		return
+	end
+	local target = fuseTarget
+	local ok, res = call("Fuse", target, fuseSelection)
+	if ok then
+		table.clear(fuseSelection)
+		local level = ProgressData.LevelFromXP((ProgressData.Parse(player:GetAttribute("UnitProgress"))[target] or {}).XP)
+		showMessage(string.format("%s gained %d XP! Now Lv %d.", target, res.XP or 0, level), Color3.fromRGB(110, 200, 255))
+		refreshFuse()
+	end
+end)
+
+openFuse = function(name)
+	confirmRoll, confirmEvolve = nil, nil
+	fuseTarget = name
+	table.clear(fuseSelection)
+	fuseWin.Visible = true
+	refreshFuse()
+end
+
 local function rebuild()
 	closeDialog() -- the unit under the dialog may have changed
 	refreshSettings()
+	if fuseWin.Visible then refreshFuse() end
 	for _, c in ipairs(scroll:GetChildren()) do
 		if c:IsA("Frame") then c:Destroy() end
 	end
@@ -466,6 +737,7 @@ local function rebuild()
 	local locks = parseSet("UnitLocks", ";")
 	local equippedSet = parseSet("Equipped", ",")
 	local traits = TraitData.Parse(player:GetAttribute("UnitTraits"))
+	local progress = ProgressData.Parse(player:GetAttribute("UnitProgress"))
 	local autoEquipOn = player:GetAttribute("AutoEquip") == true
 	local types, copies, order, teamSize = 0, 0, 0, 0
 
@@ -482,7 +754,7 @@ local function rebuild()
 				order += 1
 				local isEquipped = equippedSet[name] == true
 				if isEquipped then teamSize += 1 end
-				makeCard(name, rarity, count, locks[name] == true, isEquipped, autoEquipOn, order, traits[name])
+				makeCard(name, rarity, count, locks[name] == true, isEquipped, autoEquipOn, order, traits[name], progress[name])
 			end
 		end
 	end
@@ -504,7 +776,7 @@ local function scheduleRebuild()
 end
 
 rebuild()
-for _, attribute in ipairs({ "UnitCounts", "UnitLocks", "Equipped", "AutoEquip", "AutoDelete", "UnitTraits" }) do
+for _, attribute in ipairs({ "UnitCounts", "UnitLocks", "Equipped", "AutoEquip", "AutoDelete", "UnitTraits", "UnitProgress" }) do
 	player:GetAttributeChangedSignal(attribute):Connect(scheduleRebuild)
 end
 

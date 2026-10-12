@@ -1,7 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: InventoryService
--- (replaces the earlier version: adds rolling unit traits for Gold)
+-- (replaces the earlier version: adds fusing units for XP and evolving with extra copies)
 -- Handles every button in the inventory. The server checks everything,
 -- so a locked unit can never be deleted by a hacked client.
 
@@ -20,6 +20,8 @@ remote.Parent = ReplicatedStorage
 --   "AutoEquip",  "",         true/false
 --   "AutoDelete", rarityName, true/false
 --   "RollTrait",  unitName                 (costs Gold, see TraitData.RollCost)
+--   "Fuse",       targetName, { [unitName] = copies }   (feeds other units in for XP)
+--   "Evolve",     unitName                 (uses extra copies + Gold, see ProgressData)
 remote.OnServerInvoke = function(player, action, name, arg)
 	if typeof(action) ~= "string" or typeof(name) ~= "string" then
 		return { Success = false, Error = "Bad request." }
@@ -28,7 +30,7 @@ remote.OnServerInvoke = function(player, action, name, arg)
 		return { Success = false, Error = "Not during a match." }
 	end
 
-	local ok, err, trait
+	local ok, err, trait, xp
 	if action == "Lock" then
 		ok, err = PlayerData.SetLocked(player, name, arg == true)
 	elseif action == "Delete" then
@@ -41,9 +43,13 @@ remote.OnServerInvoke = function(player, action, name, arg)
 		ok, err = PlayerData.SetAutoDelete(player, name, arg == true)
 	elseif action == "RollTrait" then
 		ok, err, trait = PlayerData.RollTrait(player, name)
+	elseif action == "Fuse" then
+		ok, err, xp = PlayerData.Fuse(player, name, arg)
+	elseif action == "Evolve" then
+		ok, err = PlayerData.Evolve(player, name)
 	else
 		return { Success = false, Error = "Unknown action." }
 	end
 
-	return { Success = ok == true, Error = err, Trait = trait }
+	return { Success = ok == true, Error = err, Trait = trait, XP = xp }
 end

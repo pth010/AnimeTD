@@ -1,7 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: placed units get their trait's bonuses (see TraitData))
+-- (replaces the earlier version: placed units get their trait, level and evolution bonuses
+--  (see TraitData and ProgressData))
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -16,6 +17,7 @@ local UnitModels = require(ReplicatedStorage:WaitForChild("UnitModels"))
 local EnemyModels = require(ReplicatedStorage:WaitForChild("EnemyModels"))
 local LevelData = require(ReplicatedStorage:WaitForChild("LevelData"))
 local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
+local ProgressData = require(ReplicatedStorage:WaitForChild("ProgressData"))
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
 
 local arenasFolder = workspace:WaitForChild("Arenas")
@@ -469,7 +471,7 @@ end
 -- What a cash unit pays per wave at a level, with its trait's income bonus (0 past max level)
 local function farmIncome(u, level)
 	local base = u.Farm.Income[level]
-	return base and math.floor(base * TraitData.IncomeMult(u.Trait)) or 0
+	return base and math.floor(base * TraitData.IncomeMult(u.Trait) * u.ProgressIncome) or 0
 end
 
 -- Publishes info on the unit part itself so the client can show the upgrade panel
@@ -489,7 +491,7 @@ local function refreshUnit(u)
 		part:SetAttribute("Income", farmIncome(u, u.Level))
 		part:SetAttribute("NextIncome", farmIncome(u, u.Level + 1))
 	end
-	u.Label.Text = string.format("%s Lv%d%s%s", part.Name, u.Level,
+	u.Label.Text = string.format("%s%s Lv%d%s%s", u.Stars > 0 and (string.rep("★", u.Stars) .. " ") or "", part.Name, u.Level,
 		u.Trait and (" [" .. u.Trait .. "]") or "", u.HighGround and " (High)" or "")
 end
 
@@ -592,7 +594,10 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 
 	local profile = PlayerData.Get(player)
 	local trait = profile and profile.Traits[unitName]
-	local stats = TraitData.StatsFor(unitName, trait) -- base stats with the unit's trait applied
+	local xp = profile and profile.XP[unitName] or 0
+	local stars = profile and profile.Stars[unitName] or 0
+	-- base stats with the unit's trait, level and stars applied
+	local stats = ProgressData.Apply(TraitData.StatsFor(unitName, trait), xp, stars)
 	if not profile or not stats or not profile.Units[unitName] then
 		return { Success = false, Error = "You don't own that unit." }
 	end
@@ -663,6 +668,14 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 		model:PivotTo(CFrame.new(spot))
 	end
 	model.Parent = part
+	if stars > 0 then
+		-- evolved units glow gold, brighter with more stars
+		local light = Instance.new("PointLight")
+		light.Color = ProgressData.StarColor
+		light.Range = 6 + 3 * stars
+		light.Brightness = 0.6 * stars
+		light.Parent = part
+	end
 	part.Parent = arena.UnitFolder
 
 	local u = {
@@ -678,6 +691,8 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 		LastAttack = -math.huge, -- ready to attack straight away
 		Farm = UnitData.Farms[unitName], -- set for cash units
 		Trait = trait, -- nil when the unit has no trait
+		Stars = stars,
+		ProgressIncome = ProgressData.IncomeMult(xp, stars), -- cash units: level + star bonus
 	}
 	table.insert(arena.Units, u)
 	refreshUnit(u)
