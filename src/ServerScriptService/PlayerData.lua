@@ -1,10 +1,9 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: ModuleScript
 -- NAME: PlayerData
--- (replaces the earlier version: adds the equipped team, auto-equip best damage,
---  and auto-delete for newly summoned units)
+-- (replaces the earlier version: adds Gold, the main-game currency earned by winning matches)
 --
--- Single source of truth for each player's gems, pity, units, locks, team and settings.
+-- Single source of truth for each player's gems, gold, pity, units, locks, team and settings.
 -- Saving needs a published place (File > Publish to Roblox). To test in Studio, also enable
 --   Game Settings > Security > "Enable Studio Access to API Services".
 -- If loading fails, the player still plays but that session will NOT save,
@@ -20,6 +19,7 @@ local STORE_NAME = "AnimeTD_PlayerData_v1" -- bump the version to wipe everyone'
 local AUTOSAVE_INTERVAL = 120
 local SAVE_DELAY = 5 -- seconds after a change before it is written
 local STARTING_GEMS = 1000
+local STARTING_GOLD = 0
 
 -- Units every NEW player starts with. Empty = the inventory starts empty.
 -- Example: { ["Blade Novice"] = 1 }
@@ -114,6 +114,7 @@ function PlayerData.Sync(player)
 	if not profile then return end
 
 	player:SetAttribute("Gems", profile.Gems)
+	player:SetAttribute("Gold", profile.Gold)
 	player:SetAttribute("Pity", profile.Pity)
 
 	local counts, locks = {}, {}
@@ -162,6 +163,7 @@ function PlayerData.Load(player)
 
 	local profile = {
 		Gems = STARTING_GEMS,
+		Gold = STARTING_GOLD,
 		Pity = 0,
 		Units = cleanCounts(STARTING_UNITS),
 		Obtained = cleanCounts(STARTING_UNITS),
@@ -177,6 +179,7 @@ function PlayerData.Load(player)
 
 	if ok and type(saved) == "table" then
 		profile.Gems = tonumber(saved.Gems) or STARTING_GEMS
+		profile.Gold = tonumber(saved.Gold) or STARTING_GOLD
 		profile.Pity = tonumber(saved.Pity) or 0
 
 		if type(saved.Units) == "table" then
@@ -259,6 +262,7 @@ function PlayerData.Save(player)
 
 			return {
 				Gems = profile.Gems,
+				Gold = profile.Gold,
 				Pity = profile.Pity,
 				Units = units,
 				Obtained = obtained,
@@ -300,6 +304,14 @@ function PlayerData.AddGems(player, amount)
 	local profile = PlayerData.Profiles[player]
 	if not profile then return end
 	profile.Gems += amount
+	PlayerData.Sync(player)
+	PlayerData.RequestSave(player)
+end
+
+function PlayerData.AddGold(player, amount)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return end
+	profile.Gold += amount
 	PlayerData.Sync(player)
 	PlayerData.RequestSave(player)
 end

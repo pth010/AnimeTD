@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: adds match speed - 1x, 1.5x, and 2x for owners of the
---  2x Speed game pass - picked with the speed buttons in the match HUD, see SpeedUI)
+-- (replaces the earlier version: a win now pays 375 Gold + 75 Gems and shows a reward
+--  popup, see CurrencyUI)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -34,8 +34,9 @@ local INTERMISSION = 10
 local SPAWN_INTERVAL = 1
 local MIN_UNIT_SPACING = 4
 local MAX_UNITS_PER_PLAYER = 12
-local WAVE_GEMS = 20        -- gems for every player when a wave is cleared
-local WIN_GEMS = 300        -- bonus gems for beating the final wave
+local WAVE_GEMS = 20        -- gems for every player when a wave is cleared (set to 0 to turn off)
+local WIN_GEMS = 75         -- gems for every player when the team wins the match
+local WIN_GOLD = 375        -- gold for every player when the team wins the match
 local BOSS_EVERY = 5        -- a boss ends every 5th wave
 
 local UPGRADE_MAX_LEVEL = 5
@@ -404,6 +405,11 @@ local actionRemote = Instance.new("RemoteFunction")
 actionRemote.Name = "UnitActionRemote"
 actionRemote.Parent = ReplicatedStorage
 
+-- Tells a player what they just earned, so their screen can show a reward popup
+local rewardEvent = Instance.new("RemoteEvent")
+rewardEvent.Name = "RewardEvent"
+rewardEvent.Parent = ReplicatedStorage
+
 placeRemote.OnServerInvoke = function(player, unitName, position)
 	if typeof(unitName) ~= "string" or typeof(position) ~= "Vector3" then
 		return { Success = false, Error = "Bad request." }
@@ -716,7 +722,9 @@ local function runMatch(arena, participants)
 	arena.State = "Over"
 	setMatchAttr(arena, "MatchStatus", "Victory!")
 	for p in pairs(arena.Players) do
+		PlayerData.AddGold(p, WIN_GOLD)
 		PlayerData.AddGems(p, WIN_GEMS)
+		rewardEvent:FireClient(p, { Title = "VICTORY!", Gold = WIN_GOLD, Gems = WIN_GEMS })
 	end
 	task.wait(8)
 	endMatch(arena)

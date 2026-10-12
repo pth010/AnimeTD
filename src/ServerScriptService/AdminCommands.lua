@@ -6,11 +6,13 @@
 --   !setgems 5000           set your gems to exactly 5000
 --   !cash 5000              add 5000 in-match cash (only matters during a match)
 --   !setcash 5000           set your in-match cash to exactly 5000
+--   !gold 5000              add 5000 gold (main-game currency, saved)
+--   !setgold 5000           set your gold to exactly 5000
 --   !resetpity              set your summon pity back to 0
 --   !unit Starfall Kitsune  give yourself one copy of a unit
 --   !unit frost mage 3      give yourself 3 copies (names aren't case-sensitive,
 --                           and the start of a name is enough: "!unit starfall")
--- Negative numbers work for gems and cash (e.g. "!gems -500").
+-- Negative numbers work for gems, gold and cash (e.g. "!gems -500").
 -- Results and mistakes are printed in the Output window.
 --
 -- Who can use them: everyone while testing in Studio, and in the live game only the
@@ -82,6 +84,20 @@ function commands.setgems(player, args)
 	local profile = PlayerData.Get(player)
 	if not profile then return "your data is still loading" end
 	PlayerData.AddGems(player, amount - profile.Gems)
+end
+
+function commands.gold(player, args)
+	local amount = readNumber(args)
+	if not amount then return "usage: !gold <number>" end
+	PlayerData.AddGold(player, amount)
+end
+
+function commands.setgold(player, args)
+	local amount = readNumber(args)
+	if not amount then return "usage: !setgold <number>" end
+	local profile = PlayerData.Get(player)
+	if not profile then return "your data is still loading" end
+	PlayerData.AddGold(player, amount - profile.Gold)
 end
 
 function commands.cash(player, args)
