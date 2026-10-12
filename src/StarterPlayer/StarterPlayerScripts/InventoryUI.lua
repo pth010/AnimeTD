@@ -1,13 +1,14 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: InventoryUI
--- (replaces the earlier version: adds auto-equip best damage, auto-delete per rarity,
---  and Equip buttons for picking your team by hand)
+-- (replaces the earlier version: adds unit traits - each card shows its trait and has a
+--  Roll button (costs Gold), and "Trait Odds" lists every trait with its chance)
 -- Lobby only. Locked units can't be deleted. Deleting asks for confirmation.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
+local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
 local inventoryRemote = ReplicatedStorage:WaitForChild("InventoryRemote")
 local player = Players.LocalPlayer
 
@@ -70,13 +71,15 @@ close.BackgroundColor3 = Color3.fromRGB(190, 70, 70)
 close.Parent = frame
 Instance.new("UICorner", close).CornerRadius = UDim.new(0, 8)
 
-local message = plainLabel(frame, "", UDim2.new(0, 10, 1, -32), UDim2.new(1, -20, 0, 24), 15, Color3.fromRGB(255, 130, 130))
+local ERROR_COLOR = Color3.fromRGB(255, 130, 130)
+local message = plainLabel(frame, "", UDim2.new(0, 10, 1, -32), UDim2.new(1, -20, 0, 24), 15, ERROR_COLOR)
 local messageToken = 0
-local function showMessage(text)
+local function showMessage(text, color)
 	messageToken += 1
 	local mine = messageToken
 	message.Text = text
-	task.delay(2.5, function()
+	message.TextColor3 = color or ERROR_COLOR
+	task.delay(3, function()
 		if messageToken == mine then message.Text = "" end
 	end)
 end
@@ -90,7 +93,7 @@ local function call(action, name, arg)
 	if not res.Success then
 		showMessage(res.Error or "That didn't work.")
 	end
-	return res.Success
+	return res.Success, res
 end
 
 local autoEquipBtn = Instance.new("TextButton")
@@ -162,7 +165,7 @@ scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 scroll.Parent = frame
 
 local grid = Instance.new("UIGridLayout")
-grid.CellSize = UDim2.fromOffset(170, 128)
+grid.CellSize = UDim2.fromOffset(170, 164)
 grid.CellPadding = UDim2.fromOffset(8, 8)
 grid.SortOrder = Enum.SortOrder.LayoutOrder
 grid.Parent = scroll
@@ -267,10 +270,10 @@ local function addLabel(parent, text, pos, size, textSize, color, align)
 	return l
 end
 
-local function cardButton(parent, text, x, color)
+local function cardButton(parent, text, x, color, y, width)
 	local b = Instance.new("TextButton")
-	b.Position = UDim2.fromOffset(x, 98)
-	b.Size = UDim2.fromOffset(50, 24)
+	b.Position = UDim2.fromOffset(x, y or 108)
+	b.Size = UDim2.fromOffset(width or 50, 24)
 	b.Text = text
 	b.Font = Enum.Font.GothamBold
 	b.TextSize = 12
@@ -281,7 +284,10 @@ local function cardButton(parent, text, x, color)
 	return b
 end
 
-local function makeCard(name, rarity, count, locked, equipped, autoEquipOn, order)
+-- Clicking Roll on a unit with a Legendary or Mythic trait asks you to click again
+local confirmRoll = nil
+
+local function makeCard(name, rarity, count, locked, equipped, autoEquipOn, order, traitName)
 	local card = Instance.new("Frame")
 	card.LayoutOrder = order
 	card.BackgroundColor3 = rarity.Color:Lerp(Color3.new(0, 0, 0), 0.5)
@@ -298,13 +304,24 @@ local function makeCard(name, rarity, count, locked, equipped, autoEquipOn, orde
 	addLabel(card, locked and (rarity.Name .. "  -  LOCKED") or rarity.Name,
 		UDim2.fromOffset(8, 28), UDim2.new(1, -16, 0, 16), 12, locked and Color3.fromRGB(255, 215, 80) or rarity.Color)
 
-	local s = UnitData.GetStats(name)
-	addLabel(card, string.format("DMG %d   RNG %d", math.floor(s.Damage), math.floor(s.Range)),
-		UDim2.fromOffset(8, 50), UDim2.new(1, -16, 0, 16), 13, Color3.fromRGB(230, 230, 240))
+	local s = TraitData.StatsFor(name, traitName)
+	local statLine = UnitData.IsFarm(name) and "Cash unit"
+		or string.format("DMG %d   RNG %d", math.floor(s.Damage), math.floor(s.Range))
+	addLabel(card, statLine, UDim2.fromOffset(8, 50), UDim2.new(1, -16, 0, 16), 13, Color3.fromRGB(230, 230, 240))
 	addLabel(card, string.format("Cost $%d", s.Cost),
 		UDim2.fromOffset(8, 68), UDim2.new(1, -16, 0, 16), 13, Color3.fromRGB(230, 230, 240))
 	if equipped then
 		addLabel(card, "TEAM", UDim2.new(1, -54, 0, 68), UDim2.fromOffset(46, 16), 12, Color3.fromRGB(110, 230, 140), Enum.TextXAlignment.Right)
+	end
+
+	local trait = TraitData.Get(traitName)
+	local traitLabel = addLabel(card, trait and ("Trait: " .. trait.Name) or "No trait",
+		UDim2.fromOffset(8, 86), UDim2.new(1, -16, 0, 16), 13, trait and trait.Color or Color3.fromRGB(150, 150, 165))
+	if trait and trait.Tier == "Mythic" then
+		local glow = Instance.new("UIStroke")
+		glow.Color = trait.Color
+		glow.Thickness = 1
+		glow.Parent = traitLabel
 	end
 
 	local lockBtn = cardButton(card, locked and "Unlock" or "Lock", 6,
@@ -314,8 +331,31 @@ local function makeCard(name, rarity, count, locked, equipped, autoEquipOn, orde
 	local equipBtn = cardButton(card, equipped and "Remove" or "Equip", 114,
 		autoEquipOn and Color3.fromRGB(80, 80, 90) or (equipped and Color3.fromRGB(150, 110, 60) or GREEN))
 
+	local rollBtn = cardButton(card, string.format("Roll Trait (%d Gold)", TraitData.RollCost), 6,
+		Color3.fromRGB(120, 80, 200), 136, 158)
+	if confirmRoll == name and trait then
+		rollBtn.Text = "Click again to confirm"
+		rollBtn.BackgroundColor3 = Color3.fromRGB(200, 90, 60)
+	end
+
 	lockBtn.Activated:Connect(function()
 		call("Lock", name, not locked)
+	end)
+
+	rollBtn.Activated:Connect(function()
+		-- don't throw away a great trait by accident
+		if trait and (trait.Tier == "Mythic" or trait.Tier == "Legendary") and confirmRoll ~= name then
+			confirmRoll = name
+			rollBtn.Text = "Click again to confirm"
+			rollBtn.BackgroundColor3 = Color3.fromRGB(200, 90, 60)
+			return
+		end
+		confirmRoll = nil
+		local ok, res = call("RollTrait", name)
+		if ok and res.Trait then
+			local got = TraitData.Get(res.Trait)
+			showMessage(string.format("%s rolled %s %s! (%s)", name, got.Tier, got.Name, TraitData.Describe(got.Name)), got.Color)
+		end
 	end)
 
 	deleteBtn.Activated:Connect(function()
@@ -335,6 +375,83 @@ local function makeCard(name, rarity, count, locked, equipped, autoEquipOn, orde
 	end)
 end
 
+-- ===== Trait odds =====
+local oddsBtn = Instance.new("TextButton")
+oddsBtn.Position = UDim2.fromOffset(320, 64)
+oddsBtn.Size = UDim2.fromOffset(150, 28)
+oddsBtn.Text = "Trait Odds"
+oddsBtn.Font = Enum.Font.GothamBold
+oddsBtn.TextSize = 14
+oddsBtn.TextColor3 = Color3.new(1, 1, 1)
+oddsBtn.BackgroundColor3 = Color3.fromRGB(120, 80, 200)
+oddsBtn.Parent = frame
+Instance.new("UICorner", oddsBtn).CornerRadius = UDim.new(0, 6)
+
+local odds = Instance.new("Frame")
+odds.Size = UDim2.fromScale(1, 1)
+odds.BackgroundColor3 = Color3.fromRGB(20, 18, 34)
+odds.Active = true
+odds.ZIndex = 10
+odds.Visible = false
+odds.Parent = frame
+Instance.new("UICorner", odds).CornerRadius = UDim.new(0, 12)
+
+plainLabel(odds, "Trait Odds", UDim2.fromOffset(0, 8), UDim2.new(1, 0, 0, 30), 22)
+plainLabel(odds, string.format("Each roll costs %d Gold and replaces the unit's current trait.", TraitData.RollCost),
+	UDim2.fromOffset(10, 38), UDim2.new(1, -20, 0, 20), 14, Color3.fromRGB(200, 200, 220)).Font = Enum.Font.Gotham
+
+local oddsClose = Instance.new("TextButton")
+oddsClose.Size = UDim2.fromOffset(32, 32)
+oddsClose.Position = UDim2.new(1, -40, 0, 6)
+oddsClose.Text = "X"
+oddsClose.Font = Enum.Font.GothamBold
+oddsClose.TextSize = 16
+oddsClose.TextColor3 = Color3.new(1, 1, 1)
+oddsClose.BackgroundColor3 = Color3.fromRGB(190, 70, 70)
+oddsClose.Parent = odds
+Instance.new("UICorner", oddsClose).CornerRadius = UDim.new(0, 8)
+
+local oddsList = Instance.new("ScrollingFrame")
+oddsList.Position = UDim2.fromOffset(10, 66)
+oddsList.Size = UDim2.new(1, -20, 1, -76)
+oddsList.BackgroundTransparency = 1
+oddsList.BorderSizePixel = 0
+oddsList.ScrollBarThickness = 6
+oddsList.CanvasSize = UDim2.new()
+oddsList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+oddsList.Parent = odds
+local oddsLayout = Instance.new("UIListLayout")
+oddsLayout.Padding = UDim.new(0, 4)
+oddsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+oddsLayout.Parent = oddsList
+
+-- rarest tier first
+local row = 0
+for i = #TraitData.Tiers, 1, -1 do
+	local tier = TraitData.Tiers[i]
+	row += 1
+	local header = plainLabel(oddsList, tier.Name, UDim2.new(), UDim2.new(1, -10, 0, 24), 17, tier.Color)
+	header.LayoutOrder = row
+	header.TextXAlignment = Enum.TextXAlignment.Left
+	for _, trait in ipairs(TraitData.Traits) do
+		if trait.Tier == tier.Name then
+			row += 1
+			local r = Instance.new("Frame")
+			r.LayoutOrder = row
+			r.Size = UDim2.new(1, -10, 0, 26)
+			r.BackgroundColor3 = tier.Color:Lerp(Color3.new(0, 0, 0), 0.75)
+			r.Parent = oddsList
+			Instance.new("UICorner", r).CornerRadius = UDim.new(0, 6)
+			addLabel(r, trait.Name, UDim2.fromOffset(8, 0), UDim2.new(0, 120, 1, 0), 14, tier.Color)
+			addLabel(r, TraitData.Describe(trait.Name), UDim2.fromOffset(130, 0), UDim2.new(1, -210, 1, 0), 13, Color3.fromRGB(230, 230, 240))
+			addLabel(r, TraitData.ChanceText(trait.Name), UDim2.new(1, -78, 0, 0), UDim2.new(0, 70, 1, 0), 14, Color3.new(1, 1, 1), Enum.TextXAlignment.Right)
+		end
+	end
+end
+
+oddsBtn.Activated:Connect(function() odds.Visible = true end)
+oddsClose.Activated:Connect(function() odds.Visible = false end)
+
 local function rebuild()
 	closeDialog() -- the unit under the dialog may have changed
 	refreshSettings()
@@ -345,6 +462,7 @@ local function rebuild()
 	local counts = parseCounts()
 	local locks = parseSet("UnitLocks", ";")
 	local equippedSet = parseSet("Equipped", ",")
+	local traits = TraitData.Parse(player:GetAttribute("UnitTraits"))
 	local autoEquipOn = player:GetAttribute("AutoEquip") == true
 	local types, copies, order, teamSize = 0, 0, 0, 0
 
@@ -361,7 +479,7 @@ local function rebuild()
 				order += 1
 				local isEquipped = equippedSet[name] == true
 				if isEquipped then teamSize += 1 end
-				makeCard(name, rarity, count, locks[name] == true, isEquipped, autoEquipOn, order)
+				makeCard(name, rarity, count, locks[name] == true, isEquipped, autoEquipOn, order, traits[name])
 			end
 		end
 	end
@@ -383,7 +501,7 @@ local function scheduleRebuild()
 end
 
 rebuild()
-for _, attribute in ipairs({ "UnitCounts", "UnitLocks", "Equipped", "AutoEquip", "AutoDelete" }) do
+for _, attribute in ipairs({ "UnitCounts", "UnitLocks", "Equipped", "AutoEquip", "AutoDelete", "UnitTraits" }) do
 	player:GetAttributeChangedSignal(attribute):Connect(scheduleRebuild)
 end
 

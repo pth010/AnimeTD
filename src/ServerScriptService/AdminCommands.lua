@@ -12,6 +12,7 @@
 --   !unit Starfall Kitsune  give yourself one copy of a unit
 --   !unit frost mage 3      give yourself 3 copies (names aren't case-sensitive,
 --                           and the start of a name is enough: "!unit starfall")
+--   !trait blade novice lord  put a trait on a unit you own ("!trait blade novice none" removes it)
 -- Negative numbers work for gems, gold and cash (e.g. "!gems -500").
 -- Results and mistakes are printed in the Output window.
 --
@@ -23,6 +24,7 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
+local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
 
 local ADMINS = {
@@ -139,6 +141,32 @@ function commands.unit(player, args)
 	profile.Units[unitName] = (profile.Units[unitName] or 0) + count
 	PlayerData.Refresh(player)
 	print(string.format("[AdminCommands] gave %s %d x %s", player.Name, count, unitName))
+end
+
+function commands.trait(player, args)
+	-- The trait is the last word(s): try the longest trait name that fits the end
+	local lowerArgs = string.lower(args)
+	local unitPart, traitName
+	if string.sub(lowerArgs, -5) == " none" then
+		unitPart = string.sub(args, 1, -6)
+	else
+		for _, trait in ipairs(TraitData.Traits) do
+			local tail = " " .. string.lower(trait.Name)
+			if string.sub(lowerArgs, -#tail) == tail and (not traitName or #trait.Name > #traitName) then
+				traitName = trait.Name
+				unitPart = string.sub(args, 1, #args - #tail)
+			end
+		end
+		if not traitName then
+			return "usage: !trait <unit> <trait>   (traits: Lord, Celestial, Midas, Sharp, ...)"
+		end
+	end
+
+	local unitName, problem = findUnit(unitPart)
+	if not unitName then return problem end
+	local ok, err = PlayerData.SetTrait(player, unitName, traitName)
+	if not ok then return err end
+	print(string.format("[AdminCommands] %s's %s now has trait %s", player.Name, unitName, traitName or "none"))
 end
 
 local function onChatted(player, message)

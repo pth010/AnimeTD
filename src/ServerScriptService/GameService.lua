@@ -1,9 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: matches are played on a level picked from the level select
---  (see LevelData) - waves, enemy strength, start cash and rewards come from the level, and
---  the first player on a team pad (the host) chooses it)
+-- (replaces the earlier version: placed units get their trait's bonuses (see TraitData))
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -17,6 +15,7 @@ local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local UnitModels = require(ReplicatedStorage:WaitForChild("UnitModels"))
 local EnemyModels = require(ReplicatedStorage:WaitForChild("EnemyModels"))
 local LevelData = require(ReplicatedStorage:WaitForChild("LevelData"))
+local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
 
 local arenasFolder = workspace:WaitForChild("Arenas")
@@ -462,9 +461,15 @@ end
 local function upgradeCost(u)
 	if u.Level >= maxLevel(u) then return -1 end
 	if u.Farm then
-		return u.Farm.UpgradeCosts[u.Level]
+		return math.floor(u.Farm.UpgradeCosts[u.Level] * TraitData.CostMult(u.Trait))
 	end
 	return math.floor(u.BaseStats.Cost * UPGRADE_COST_MULT * u.Level)
+end
+
+-- What a cash unit pays per wave at a level, with its trait's income bonus (0 past max level)
+local function farmIncome(u, level)
+	local base = u.Farm.Income[level]
+	return base and math.floor(base * TraitData.IncomeMult(u.Trait)) or 0
 end
 
 -- Publishes info on the unit part itself so the client can show the upgrade panel
@@ -478,19 +483,21 @@ local function refreshUnit(u)
 	part:SetAttribute("Damage", u.Stats.Damage)
 	part:SetAttribute("Range", u.Stats.Range)
 	part:SetAttribute("HighGround", u.HighGround)
+	part:SetAttribute("Trait", u.Trait or "")
 	if u.Farm then
 		part:SetAttribute("IsFarm", true)
-		part:SetAttribute("Income", u.Farm.Income[u.Level])
-		part:SetAttribute("NextIncome", u.Farm.Income[u.Level + 1] or 0)
+		part:SetAttribute("Income", farmIncome(u, u.Level))
+		part:SetAttribute("NextIncome", farmIncome(u, u.Level + 1))
 	end
-	u.Label.Text = string.format("%s Lv%d%s", part.Name, u.Level, u.HighGround and " (High)" or "")
+	u.Label.Text = string.format("%s Lv%d%s%s", part.Name, u.Level,
+		u.Trait and (" [" .. u.Trait .. "]") or "", u.HighGround and " (High)" or "")
 end
 
 -- Cash units pay out when a wave is cleared, with a "+$250" popping up over each one
 local function payFarms(arena)
 	for _, u in ipairs(arena.Units) do
 		if u.Farm then
-			local amount = u.Farm.Income[u.Level]
+			local amount = farmIncome(u, u.Level)
 			addCash(u.Owner, amount)
 			local pop = makeNameTag(u.Part, "+$" .. amount, 4.6)
 			pop.TextColor3 = Color3.fromRGB(255, 215, 80)
@@ -584,7 +591,8 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 	end
 
 	local profile = PlayerData.Get(player)
-	local stats = UnitData.GetStats(unitName)
+	local trait = profile and profile.Traits[unitName]
+	local stats = TraitData.StatsFor(unitName, trait) -- base stats with the unit's trait applied
 	if not profile or not stats or not profile.Units[unitName] then
 		return { Success = false, Error = "You don't own that unit." }
 	end
@@ -669,6 +677,7 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 		Invested = stats.Cost,
 		LastAttack = -math.huge, -- ready to attack straight away
 		Farm = UnitData.Farms[unitName], -- set for cash units
+		Trait = trait, -- nil when the unit has no trait
 	}
 	table.insert(arena.Units, u)
 	refreshUnit(u)

@@ -1,7 +1,7 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: PlacementUI
--- (replaces the earlier version: the upgrade panel shows income for cash units)
+-- (replaces the earlier version: costs, range and the upgrade panel include unit traits)
 -- HUD (wave, base HP, cash), unit hotbar, click-to-place with a range preview.
 -- Controls: click a unit in the hotbar, then click a green plot to place it.
 -- Click a placed unit (with nothing selected) to upgrade or sell it.
@@ -15,12 +15,19 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
+local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
 local placeRemote = ReplicatedStorage:WaitForChild("PlaceUnitRemote")
 local actionRemote = ReplicatedStorage:WaitForChild("UnitActionRemote")
 local placeable = nil   -- this match's PlaceableArea (set when a match starts)
 local unitsFolder = nil -- this match's Units folder
 
 local player = Players.LocalPlayer
+
+-- A unit's stats with your trait on it applied (cost, range...)
+local function myStats(name)
+	local traits = TraitData.Parse(player:GetAttribute("UnitTraits"))
+	return TraitData.StatsFor(name, traits[name])
+end
 local camera = workspace.CurrentCamera
 
 -- Each team plays in its own arena; the server tells us which one via ArenaId
@@ -99,8 +106,8 @@ player:GetAttributeChangedSignal("Cash"):Connect(refreshHud)
 
 -- ===== UPGRADE / SELL PANEL =====
 local panel = Instance.new("Frame")
-panel.Size = UDim2.fromOffset(210, 190)
-panel.Position = UDim2.new(1, -230, 0.5, -95)
+panel.Size = UDim2.fromOffset(210, 220)
+panel.Position = UDim2.new(1, -230, 0.5, -110)
 panel.BackgroundColor3 = Color3.fromRGB(25, 25, 40)
 panel.Visible = false
 panel.Parent = gui
@@ -133,9 +140,9 @@ local function panelButton(posY, color)
 end
 
 local panelTitle = panelLabel(8, 24, 17)
-local panelStats = panelLabel(36, 56, 14)
-local upgradeBtn = panelButton(92, Color3.fromRGB(60, 160, 90))
-local sellBtn = panelButton(138, Color3.fromRGB(190, 70, 70))
+local panelStats = panelLabel(36, 86, 14)
+local upgradeBtn = panelButton(122, Color3.fromRGB(60, 160, 90))
+local sellBtn = panelButton(168, Color3.fromRGB(190, 70, 70))
 
 local rangeRing = Instance.new("Part")
 rangeRing.Shape = Enum.PartType.Cylinder
@@ -172,6 +179,7 @@ local function refreshPanel()
 	local sellValue = inspected:GetAttribute("SellValue") or 0
 
 	panelTitle.Text = string.format("%s  Lv %d/%d", inspected.Name, level, maxLevel)
+	local trait = TraitData.Get(inspected:GetAttribute("Trait"))
 	local isFarm = inspected:GetAttribute("IsFarm") == true
 	local statsText
 	if isFarm then
@@ -183,6 +191,9 @@ local function refreshPanel()
 		if inspected:GetAttribute("HighGround") then
 			statsText ..= "\nHigh ground bonus!"
 		end
+	end
+	if trait then
+		statsText ..= string.format("\nTrait: %s (%s)", trait.Name, TraitData.Describe(trait.Name))
 	end
 	panelStats.Text = statsText
 	upgradeBtn.Text = cost >= 0 and string.format("Upgrade ($%d)", cost) or "MAX LEVEL"
@@ -233,7 +244,7 @@ local function selectUnit(name)
 	selected = name
 	if name then
 		closePanel()
-		selectedRange = UnitData.GetStats(name).Range
+		selectedRange = myStats(name).Range
 		ghost.Parent = workspace
 	else
 		ghost.Parent = nil
@@ -363,7 +374,7 @@ local function refreshHotbarCounts()
 			local placed = placedCount(name)
 			local full = placed >= limit
 			local color = UnitData.RarityColor[UnitData.UnitRarity[name]]
-			b.Text = string.format("[%d] %s\n$%d  -  %d/%d", i, name, UnitData.GetStats(name).Cost, placed, limit)
+			b.Text = string.format("[%d] %s\n$%d  -  %d/%d", i, name, myStats(name).Cost, placed, limit)
 			b.BackgroundColor3 = full and color:Lerp(Color3.fromRGB(60, 60, 70), 0.75) or color
 			b.TextTransparency = full and 0.35 or 0
 		end
@@ -386,7 +397,7 @@ local function rebuildHotbar()
 		end
 	end
 	table.sort(names, function(a, b)
-		local ca, cb = UnitData.GetStats(a).Cost, UnitData.GetStats(b).Cost
+		local ca, cb = myStats(a).Cost, myStats(b).Cost
 		if ca ~= cb then return ca < cb end
 		return a < b
 	end)
@@ -395,7 +406,7 @@ local function rebuildHotbar()
 	table.clear(hotbarButtons)
 
 	for i, name in ipairs(names) do
-		local stats = UnitData.GetStats(name)
+		local stats = myStats(name)
 		local b = Instance.new("TextButton")
 		b.LayoutOrder = i
 		b.Size = UDim2.fromOffset(100, 64)
@@ -428,7 +439,7 @@ rebuildHotbar()
 refreshHotbarCounts()
 refreshHotbarHighlight()
 player:GetAttributeChangedSignal("PlacedCounts"):Connect(refreshHotbarCounts)
-player:GetAttributeChangedSignal("Equipped"):Connect(function()
+local function onTeamChanged()
 	rebuildHotbar()
 	refreshHotbarCounts()
 	if selected and not hotbarButtons[selected] then
@@ -436,7 +447,9 @@ player:GetAttributeChangedSignal("Equipped"):Connect(function()
 	else
 		refreshHotbarHighlight()
 	end
-end)
+end
+player:GetAttributeChangedSignal("Equipped"):Connect(onTeamChanged)
+player:GetAttributeChangedSignal("UnitTraits"):Connect(onTeamChanged) -- costs change with traits
 
 -- ===== LOBBY vs MATCH =====
 -- The HUD and hotbar only show while you're in a match

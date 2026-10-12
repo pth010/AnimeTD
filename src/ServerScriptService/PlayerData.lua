@@ -1,8 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: ModuleScript
 -- NAME: PlayerData
--- (replaces the earlier version: remembers which levels each player has beaten, which
---  unlocks the next level in the level select)
+-- (replaces the earlier version: adds unit traits, rolled with Gold in the inventory)
 --
 -- Single source of truth for each player's gems, gold, pity, units, locks, team and settings.
 -- Saving needs a published place (File > Publish to Roblox). To test in Studio, also enable
@@ -15,6 +14,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DataStoreService = game:GetService("DataStoreService")
 
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
+local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
 
 local STORE_NAME = "AnimeTD_PlayerData_v1" -- bump the version to wipe everyone's data
 local AUTOSAVE_INTERVAL = 120
@@ -48,6 +48,7 @@ PlayerData.Profiles = {}
 --   AutoEquip  = true: the team is always your best units by damage per second
 --   AutoDelete [rarityName] = true: newly summoned units of that rarity are deleted on arrival
 --   Cleared    [levelId] = true: levels this player has beaten (see LevelData)
+--   Traits     [name] = trait name (see TraitData), one per unit you own
 -- Units = Obtained - Deleted. Keeping both running totals lets two servers merge
 -- their saves safely: taking the higher of each total can never resurrect a deleted
 -- unit or lose a new one.
@@ -67,11 +68,11 @@ end
 -- ===== Team helpers =====
 -- How auto-equip ranks units: cash units first (they never attack, so damage can't
 -- rank them), then everything else by damage per second
-local function dps(unitName)
+local function dps(profile, unitName)
 	if UnitData.IsFarm(unitName) then
 		return math.huge
 	end
-	local s = UnitData.GetStats(unitName)
+	local s = TraitData.StatsFor(unitName, profile.Traits[unitName])
 	return s.Damage / s.Cooldown
 end
 
@@ -81,7 +82,7 @@ local function autoEquipBest(profile)
 		table.insert(names, name)
 	end
 	table.sort(names, function(a, b)
-		local da, db = dps(a), dps(b)
+		local da, db = dps(profile, a), dps(profile, b)
 		if da ~= db then return da > db end
 		return a < b
 	end)
@@ -152,6 +153,15 @@ function PlayerData.Sync(player)
 	end
 	table.sort(cleared)
 	player:SetAttribute("ClearedLevels", table.concat(cleared, ","))    -- "1,2"
+
+	local traits = {}
+	for name, trait in pairs(profile.Traits) do
+		if profile.Units[name] then
+			table.insert(traits, name .. "=" .. trait)
+		end
+	end
+	table.sort(traits)
+	player:SetAttribute("UnitTraits", table.concat(traits, ";"))        -- "Blade Novice=Lord;Frost Mage=Swift"
 end
 
 local function loadFromStore(userId)
@@ -187,6 +197,7 @@ function PlayerData.Load(player)
 		AutoEquip = true,
 		AutoDelete = {},
 		Cleared = {},
+		Traits = {},
 		Busy = false,
 		SavePending = false,
 		CanSave = ok, -- never save over a profile we failed to load
@@ -236,6 +247,13 @@ function PlayerData.Load(player)
 				end
 			end
 		end
+		if type(saved.Traits) == "table" then
+			for name, trait in pairs(saved.Traits) do
+				if profile.Units[name] and TraitData.Get(trait) then
+					profile.Traits[name] = trait
+				end
+			end
+		end
 	end
 
 	normalizeEquipment(profile)
@@ -264,7 +282,7 @@ function PlayerData.Save(player)
 				end
 			end
 
-			local units, locked = {}, {}
+			local units, locked, traits = {}, {}, {}
 			for name, got in pairs(obtained) do
 				local left = got - (deleted[name] or 0)
 				if left > 0 then
@@ -272,6 +290,10 @@ function PlayerData.Save(player)
 					if profile.Locked[name] then
 						locked[name] = true
 					end
+					-- keep this server's trait, or the one another server saved
+					traits[name] = profile.Traits[name]
+						or (type(old) == "table" and type(old.Traits) == "table" and TraitData.Get(old.Traits[name]) and old.Traits[name])
+						or nil
 				end
 			end
 
@@ -310,6 +332,7 @@ function PlayerData.Save(player)
 				AutoEquip = profile.AutoEquip,
 				AutoDelete = table.clone(profile.AutoDelete),
 				Cleared = clearedList,
+				Traits = traits,
 			}
 		end)
 	end)
@@ -401,6 +424,9 @@ function PlayerData.DeleteUnit(player, unitName, amount)
 
 	profile.Deleted[unitName] = (profile.Deleted[unitName] or 0) + n
 	profile.Units[unitName] = (have - n > 0) and (have - n) or nil
+	if not profile.Units[unitName] then
+		profile.Traits[unitName] = nil -- the last copy is gone, so is its trait
+	end
 
 	PlayerData.Refresh(player)
 	return true
@@ -443,6 +469,34 @@ function PlayerData.SetAutoEquip(player, on)
 	local profile = PlayerData.Profiles[player]
 	if not profile then return false, "Still loading." end
 	profile.AutoEquip = on and true or false
+	PlayerData.Refresh(player)
+	return true
+end
+
+-- Rolls a new random trait onto a unit for TraitData.RollCost Gold.
+-- Returns ok, errorMessage, newTraitName
+function PlayerData.RollTrait(player, unitName)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	if not profile.Units[unitName] then return false, "You don't have that unit." end
+	if profile.Gold < TraitData.RollCost then
+		return false, string.format("You need %d Gold to roll a trait.", TraitData.RollCost)
+	end
+
+	profile.Gold -= TraitData.RollCost
+	local trait = TraitData.Roll()
+	profile.Traits[unitName] = trait
+	PlayerData.Refresh(player) -- the trait can change who auto-equip picks
+	return true, nil, trait
+end
+
+-- Sets a unit's trait directly (tester command). nil removes it.
+function PlayerData.SetTrait(player, unitName, traitName)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	if not profile.Units[unitName] then return false, "You don't have that unit." end
+	if traitName ~= nil and not TraitData.Get(traitName) then return false, "Unknown trait." end
+	profile.Traits[unitName] = traitName
 	PlayerData.Refresh(player)
 	return true
 end
