@@ -1,14 +1,19 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: LobbyBuilder
--- (replaces the earlier version: the Traits Cave is underground, down a ramp from the square,
---  and the empty ground outside the city is hidden behind a ring of distant buildings)
+-- (replaces the earlier version: a night sky over the lobby, deeper colors and green lawns.
+--  Matches stay in daylight: PlacementUI switches each player's lighting to day in a match.)
 -- Builds the lobby at runtime:
 --   * a 240 x 240 stud city square under the open sky: tiled paving, a red-brick walkway,
 --     sakura trees, street lamps and benches
 --   * a ring of buildings closing it in (shops with awnings and neon signs, lit windows,
 --     rooftop props), a station building behind the team pads, a torii gate behind the
 --     spawn, corner towers and a skyline of taller towers further back
+--   * green lawns in the open areas of the square
+--   * a night sky with stars, moonlight, a light night haze and bloom so the lit windows,
+--     neon signs and lamps glow. Lighting is shared by the whole server, so the day and night
+--     settings are stored on Lighting as attributes and each player's screen switches to day
+--     during a match (see PlacementUI)
 --   * invisible walls at the edge of the square so nobody wanders off
 --   * the default Baseplate is hidden (made invisible and not solid): the lobby has its own
 --     ground, and a ring of distant buildings closes off the view outside the city
@@ -148,9 +153,10 @@ local cityRng = Random.new(2024)
 local EDGE = half          -- the square runs from -EDGE to +EDGE on X and Z
 local STREET = EDGE + 4    -- the buildings' front faces stand here
 
-local PAVING = Color3.fromRGB(205, 198, 186)
-local PAVING_DARK = Color3.fromRGB(176, 168, 156)
-local BRICK = Color3.fromRGB(170, 82, 66)
+local PAVING = Color3.fromRGB(122, 116, 134)
+local PAVING_DARK = Color3.fromRGB(94, 88, 110)
+local BRICK = Color3.fromRGB(150, 52, 44)
+local GRASS = Color3.fromRGB(58, 132, 58)
 local SAKURA = Color3.fromRGB(255, 183, 213)
 
 -- The opening in the paving where the ramp goes down into the underground Traits Cave
@@ -213,8 +219,28 @@ makePart(roomFolder, "CrossPath", Vector3.new(98, 0.1, 14), CENTER + Vector3.new
 -- a lighter sidewalk band around the edge
 for _, side in ipairs({ { Vector3.new(SIZE, 0.1, 8), Vector3.new(0, 0, EDGE - 4) }, { Vector3.new(SIZE, 0.1, 8), Vector3.new(0, 0, -EDGE + 4) },
 	{ Vector3.new(8, 0.1, SIZE - 16), Vector3.new(EDGE - 4, 0, 0) }, { Vector3.new(8, 0.1, SIZE - 16), Vector3.new(-EDGE + 4, 0, 0) } }) do
-	makePart(roomFolder, "Sidewalk", side[1], CENTER + side[2] + Vector3.new(0, 0.48, 0), Color3.fromRGB(225, 220, 212), Enum.Material.Concrete)
+	makePart(roomFolder, "Sidewalk", side[1], CENTER + side[2] + Vector3.new(0, 0.48, 0), Color3.fromRGB(150, 145, 162), Enum.Material.Concrete)
 end
+
+-- Green lawns in the open areas of the square (clear of the walkway, fountain, cave, pads
+-- and spawn), each with a low stone edge
+local function lawn(x0, x1, z0, z1)
+	local size = Vector3.new(x1 - x0, 0.12, z1 - z0)
+	local center = CENTER + Vector3.new((x0 + x1) / 2, 0.5, (z0 + z1) / 2)
+	makePart(roomFolder, "Lawn", size, center, GRASS, Enum.Material.Grass)
+	for _, e in ipairs({
+		{ Vector3.new(size.X + 1, 0.5, 0.5), Vector3.new(0, 0, size.Z / 2) },
+		{ Vector3.new(size.X + 1, 0.5, 0.5), Vector3.new(0, 0, -size.Z / 2) },
+		{ Vector3.new(0.5, 0.5, size.Z), Vector3.new(size.X / 2, 0, 0) },
+		{ Vector3.new(0.5, 0.5, size.Z), Vector3.new(-size.X / 2, 0, 0) },
+	}) do
+		makePart(roomFolder, "LawnEdge", e[1], center + e[2] + Vector3.new(0, 0.1, 0), Color3.fromRGB(105, 100, 112), Enum.Material.Concrete)
+	end
+end
+lawn(-112, -26, -50, 38)  -- back left (between the pads and the fountain)
+lawn(26, 112, -50, 36)    -- back right (between the pads and the cave)
+lawn(-112, -26, 80, 112)  -- front left (beside the spawn)
+lawn(26, 112, 94, 112)    -- front right (beside the spawn, past the cave sign)
 
 -- Invisible walls at the edge of the square (the gaps between buildings are open)
 for _, wall in ipairs({ { Vector3.new(SIZE + 8, 120, 2), Vector3.new(0, 60, EDGE + 2) }, { Vector3.new(SIZE + 8, 120, 2), Vector3.new(0, 60, -EDGE - 2) },
@@ -233,7 +259,7 @@ local function windows(part, face, widthStuds, heightStuds, bottomGap, topGap, s
 	gui.Face = face
 	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
 	gui.PixelsPerStud = 8
-	gui.LightInfluence = 0.3
+	gui.LightInfluence = 0 -- windows glow at night
 	gui.Parent = part
 	local cols = math.max(1, math.floor(widthStuds / spacing))
 	local rows = math.max(1, math.floor((heightStuds - bottomGap - topGap) / rowStep))
@@ -277,9 +303,9 @@ local function signText(part, face, text, color, font)
 end
 
 local BUILDING_COLORS = {
-	Color3.fromRGB(242, 226, 200), Color3.fromRGB(232, 168, 150), Color3.fromRGB(150, 196, 200),
-	Color3.fromRGB(196, 178, 222), Color3.fromRGB(176, 110, 90), Color3.fromRGB(226, 206, 140),
-	Color3.fromRGB(130, 150, 182), Color3.fromRGB(214, 140, 160),
+	Color3.fromRGB(28, 104, 116), Color3.fromRGB(128, 34, 56), Color3.fromRGB(86, 48, 140),
+	Color3.fromRGB(36, 58, 120), Color3.fromRGB(36, 98, 66), Color3.fromRGB(176, 82, 34),
+	Color3.fromRGB(140, 36, 104), Color3.fromRGB(58, 46, 118),
 }
 local ACCENTS = {
 	Color3.fromRGB(235, 70, 70), Color3.fromRGB(60, 150, 230), Color3.fromRGB(70, 190, 120),
@@ -375,7 +401,7 @@ end
 -- back side (behind the pads): the station in the middle, shops either side
 local STATION_W = 190 -- wide enough for all five team banners (pads at x = -80 .. 80)
 local station = building(CENTER + Vector3.new(0, 0, -STREET), Vector3.zAxis, STATION_W, 34, 46,
-	{ Shop = false, Vertical = false, Color = Color3.fromRGB(70, 74, 108) })
+	{ Shop = false, Vertical = false, Color = Color3.fromRGB(34, 38, 74) })
 station.Name = "Station"
 buildingRow(CENTER + Vector3.new(0, 0, -STREET), Vector3.xAxis, Vector3.zAxis, -EDGE - 8, EDGE + 8, { { -STATION_W / 2, STATION_W / 2 } })
 -- front side (behind the spawn): a gap for the torii gate in the middle
@@ -403,7 +429,7 @@ for side = 1, 4 do
 		local tower = makePart(roomFolder, "SkylineTower", Vector3.new(width, 1, width), front, Color3.new(1, 1, 1))
 		local height = cityRng:NextInteger(110, 190)
 		tower.Size = Vector3.new(width, height, width)
-		tower.Color = Color3.fromRGB(96, 108, 140):Lerp(Color3.fromRGB(150, 160, 190), cityRng:NextNumber())
+		tower.Color = Color3.fromRGB(26, 30, 60):Lerp(Color3.fromRGB(56, 62, 108), cityRng:NextNumber())
 		tower.CFrame = CFrame.lookAt(front, front - dir) * CFrame.new(0, height / 2, width / 2)
 		windows(tower, Enum.NormalId.Front, width, height, 4, 4, 8)
 	end
@@ -416,7 +442,7 @@ for side = 1, 4 do
 	local dir = ({ Vector3.zAxis, -Vector3.zAxis, Vector3.xAxis, -Vector3.xAxis })[side]
 	local length = BACKDROP * 2 + 4
 	local front = CENTER + dir * BACKDROP
-	local wall = makePart(roomFolder, "Backdrop", Vector3.new(length, 70, 4), front, Color3.fromRGB(84, 92, 122))
+	local wall = makePart(roomFolder, "Backdrop", Vector3.new(length, 70, 4), front, Color3.fromRGB(32, 36, 66))
 	wall.CFrame = CFrame.lookAt(front, front - dir) * CFrame.new(0, 35, 2)
 	windows(wall, Enum.NormalId.Front, length, 70, 4, 4, 10)
 end
@@ -896,6 +922,60 @@ for i = 1, NUM_PADS do
 
 	-- a hanging team banner on the station's front behind each pad
 	makePart(roomFolder, "PadStripe" .. i, Vector3.new(16, 22, 0.4), CENTER + Vector3.new(x, 15, -(half + 4) + 0.3), color, Enum.Material.Neon)
+end
+
+-- ===== Night sky =====
+-- Lighting is shared by the whole server (lobby and arenas). The lobby is night; matches stay
+-- in daylight. The original daylight settings and the night settings are both stored on
+-- Lighting as attributes ("Day_ClockTime", "Night_ClockTime", ...), and PlacementUI switches
+-- each player's own lighting between them as they go in and out of matches.
+do
+	local Lighting = game:GetService("Lighting")
+	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
+	if not atmosphere then
+		atmosphere = Instance.new("Atmosphere")
+		atmosphere.Density = 0
+		atmosphere.Parent = Lighting
+	end
+	local NIGHT = {
+		ClockTime = 0.2,
+		Brightness = 1.6,
+		Ambient = Color3.fromRGB(44, 46, 78),
+		OutdoorAmbient = Color3.fromRGB(80, 88, 136),
+		ExposureCompensation = 0.25,
+		EnvironmentDiffuseScale = 0.4,
+		EnvironmentSpecularScale = 0.6,
+	}
+	for prop, nightValue in pairs(NIGHT) do
+		Lighting:SetAttribute("Day_" .. prop, Lighting[prop])
+		Lighting:SetAttribute("Night_" .. prop, nightValue)
+		Lighting[prop] = nightValue
+	end
+	-- a light blue night haze that softens the distant skyline (none during the day)
+	Lighting:SetAttribute("Day_AtmosphereDensity", atmosphere.Density)
+	Lighting:SetAttribute("Night_AtmosphereDensity", 0.32)
+	atmosphere.Density = 0.32
+	atmosphere.Offset = 0.1
+	atmosphere.Color = Color3.fromRGB(70, 82, 140)
+	atmosphere.Decay = Color3.fromRGB(30, 30, 70)
+	atmosphere.Glare = 0
+	atmosphere.Haze = 1.2
+
+	-- glow on neon and lit windows, and a little extra color everywhere
+	if not Lighting:FindFirstChildOfClass("BloomEffect") then
+		local bloom = Instance.new("BloomEffect")
+		bloom.Intensity = 0.7
+		bloom.Size = 28
+		bloom.Threshold = 1.4
+		bloom.Parent = Lighting
+	end
+	if not Lighting:FindFirstChild("LobbyColor") then
+		local grade = Instance.new("ColorCorrectionEffect")
+		grade.Name = "LobbyColor"
+		grade.Saturation = 0.18
+		grade.Contrast = 0.06
+		grade.Parent = Lighting
+	end
 end
 
 lobby.Parent = workspace

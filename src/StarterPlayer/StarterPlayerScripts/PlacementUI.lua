@@ -1,8 +1,10 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: PlacementUI
--- (replaces the earlier version: the team bar at the bottom (see InventoryUI) is the hotbar
---  in matches too, so this script no longer draws its own. Keys 1-6 follow the team slots.)
+-- (replaces the earlier version: switches your lighting to daylight during a match and back
+--  to the lobby's night sky afterwards, see LobbyBuilder)
+-- The team bar at the bottom (see InventoryUI) is the hotbar in matches too, so this script
+-- doesn't draw its own. Keys 1-6 follow the team slots.
 -- HUD (wave, base HP, cash) and click-to-place with a range preview.
 -- Controls: click a unit on the team bar, then click a green plot to place it.
 -- Click a placed unit (with nothing selected) to upgrade or sell it.
@@ -431,10 +433,33 @@ player:GetAttributeChangedSignal("Equipped"):Connect(onTeamChanged)
 player:GetAttributeChangedSignal("UnitTraits"):Connect(onTeamChanged) -- costs change with traits
 player:GetAttributeChangedSignal("UnitProgress"):Connect(onTeamChanged)
 
+-- ===== DAY / NIGHT =====
+-- The lobby is night, matches are daylight. LobbyBuilder stores both versions of each lighting
+-- setting on Lighting as attributes ("Day_ClockTime" / "Night_ClockTime", ...); this switches
+-- your own lighting between them (only on your screen).
+local Lighting = game:GetService("Lighting")
+local LIGHTING_PROPS = { "ClockTime", "Brightness", "Ambient", "OutdoorAmbient", "ExposureCompensation",
+	"EnvironmentDiffuseScale", "EnvironmentSpecularScale" }
+local function applyTimeOfDay(day)
+	local prefix = day and "Day_" or "Night_"
+	for _, prop in ipairs(LIGHTING_PROPS) do
+		local value = Lighting:GetAttribute(prefix .. prop)
+		if value ~= nil then
+			Lighting[prop] = value
+		end
+	end
+	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
+	local density = Lighting:GetAttribute(prefix .. "AtmosphereDensity")
+	if atmosphere and density then
+		atmosphere.Density = density
+	end
+end
+
 -- ===== LOBBY vs MATCH =====
 -- The HUD and hotbar only show while you're in a match
 local function updateMatchVisibility()
 	local inMatch = player:GetAttribute("InMatch") == true
+	applyTimeOfDay(inMatch)
 	hud.Visible = inMatch
 	if not inMatch then
 		selectUnit(nil)
