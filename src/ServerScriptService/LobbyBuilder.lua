@@ -1,7 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: LobbyBuilder
--- (replaces the earlier version: the lobby is an open-air city square instead of a room)
+-- (replaces the earlier version: the Traits Cave is underground, down a ramp from the square,
+--  and the empty ground outside the city is hidden behind a ring of distant buildings)
 -- Builds the lobby at runtime:
 --   * a 240 x 240 stud city square under the open sky: tiled paving, a red-brick walkway,
 --     sakura trees, street lamps and benches
@@ -9,9 +10,12 @@
 --     rooftop props), a station building behind the team pads, a torii gate behind the
 --     spawn, corner towers and a skyline of taller towers further back
 --   * invisible walls at the edge of the square so nobody wanders off
+--   * the default Baseplate is hidden (made invisible and not solid): the lobby has its own
+--     ground, and a ring of distant buildings closes off the view outside the city
 --   * the player spawn near the front (torii) side
 --   * the Wishing Fountain (walk up to it and the summon window pops up) with its own sign
---   * the Traits Cave across from it (walk inside and the trait summon window pops up)
+--   * the Traits Cave across from it, sunk underground: a ramp leads down into it from an
+--     opening in the square (walk inside and the trait summon window pops up)
 --   * FIVE team queue pads in front of the station, each with a standing sign board that
 --     shows the team name and the live queue status
 -- Assumes the default 512x512 Baseplate (the square is centered on the origin).
@@ -149,12 +153,53 @@ local PAVING_DARK = Color3.fromRGB(176, 168, 156)
 local BRICK = Color3.fromRGB(170, 82, 66)
 local SAKURA = Color3.fromRGB(255, 183, 213)
 
--- Paving, with a big two-tone tile pattern
-makePart(roomFolder, "Floor", Vector3.new(SIZE, 0.4, SIZE), CENTER + Vector3.new(0, 0.2, 0), PAVING, Enum.Material.Slate)
+-- The opening in the paving where the ramp goes down into the underground Traits Cave
+-- (see the Traits Cave section further down)
+local CAVE_OPENING = { X0 = 31.5, X1 = 68.5, Z0 = 48.5, Z1 = 61.5 }
+local function overlapsOpening(x0, x1, z0, z1)
+	return x1 > CAVE_OPENING.X0 and x0 < CAVE_OPENING.X1 and z1 > CAVE_OPENING.Z0 and z0 < CAVE_OPENING.Z1
+end
+
+-- The default Baseplate would block the underground cave and shows as flat grey ground past
+-- the city, so hide it (it stays in the place, just invisible and not solid)
+local baseplate = workspace:FindFirstChild("Baseplate")
+if baseplate and baseplate:IsA("BasePart") then
+	baseplate.Transparency = 1
+	baseplate.CanCollide = false
+	baseplate.CanQuery = false
+	baseplate.CanTouch = false
+	for _, d in ipairs(baseplate:GetDescendants()) do
+		if d:IsA("Decal") or d:IsA("Texture") then
+			d.Transparency = 1
+		end
+	end
+end
+
+-- Paving (in four pieces around the cave opening), with a big two-tone tile pattern
+local function floorPiece(x0, x1, z0, z1)
+	makePart(roomFolder, "Floor", Vector3.new(x1 - x0, 0.4, z1 - z0), CENTER + Vector3.new((x0 + x1) / 2, 0.2, (z0 + z1) / 2), PAVING, Enum.Material.Slate)
+end
+floorPiece(-EDGE, CAVE_OPENING.X0, -EDGE, EDGE)
+floorPiece(CAVE_OPENING.X1, EDGE, -EDGE, EDGE)
+floorPiece(CAVE_OPENING.X0, CAVE_OPENING.X1, CAVE_OPENING.Z1, EDGE)
+floorPiece(CAVE_OPENING.X0, CAVE_OPENING.X1, -EDGE, CAVE_OPENING.Z0)
+
+-- Street ground under the buildings around the square (the city's own ground, since the
+-- Baseplate is hidden)
+local GROUND_OUT = 176
+for _, g in ipairs({
+	{ Vector3.new(GROUND_OUT * 2, 1, GROUND_OUT - EDGE), Vector3.new(0, -0.5, (GROUND_OUT + EDGE) / 2) },
+	{ Vector3.new(GROUND_OUT * 2, 1, GROUND_OUT - EDGE), Vector3.new(0, -0.5, -(GROUND_OUT + EDGE) / 2) },
+	{ Vector3.new(GROUND_OUT - EDGE, 1, SIZE), Vector3.new((GROUND_OUT + EDGE) / 2, -0.5, 0) },
+	{ Vector3.new(GROUND_OUT - EDGE, 1, SIZE), Vector3.new(-(GROUND_OUT + EDGE) / 2, -0.5, 0) },
+}) do
+	makePart(roomFolder, "Street", g[1], CENTER + g[2], Color3.fromRGB(60, 60, 68), Enum.Material.Asphalt)
+end
 local TILE = 24
 for ix = 0, SIZE / TILE - 1 do
 	for iz = 0, SIZE / TILE - 1 do
-		if (ix + iz) % 2 == 0 then
+		local tx0, tz0 = -EDGE + TILE * ix, -EDGE + TILE * iz
+		if (ix + iz) % 2 == 0 and not overlapsOpening(tx0, tx0 + TILE, tz0, tz0 + TILE) then
 			local tile = makePart(roomFolder, "Tile", Vector3.new(TILE, 0.05, TILE),
 				CENTER + Vector3.new(-EDGE + TILE * (ix + 0.5), 0.425, -EDGE + TILE * (iz + 0.5)), PAVING_DARK, Enum.Material.Slate)
 			tile.CanCollide = false
@@ -163,7 +208,8 @@ for ix = 0, SIZE / TILE - 1 do
 end
 -- red-brick walkway from the spawn to the pads, and a cross path to the fountain and the cave
 makePart(roomFolder, "Walkway", Vector3.new(24, 0.1, 170), CENTER + Vector3.new(0, 0.5, 5), BRICK, Enum.Material.Brick)
-makePart(roomFolder, "CrossPath", Vector3.new(140, 0.1, 14), CENTER + Vector3.new(0, 0.47, 58), BRICK, Enum.Material.Brick)
+-- (it stops short of the cave opening on the right)
+makePart(roomFolder, "CrossPath", Vector3.new(98, 0.1, 14), CENTER + Vector3.new(-21, 0.47, 58), BRICK, Enum.Material.Brick)
 -- a lighter sidewalk band around the edge
 for _, side in ipairs({ { Vector3.new(SIZE, 0.1, 8), Vector3.new(0, 0, EDGE - 4) }, { Vector3.new(SIZE, 0.1, 8), Vector3.new(0, 0, -EDGE + 4) },
 	{ Vector3.new(8, 0.1, SIZE - 16), Vector3.new(EDGE - 4, 0, 0) }, { Vector3.new(8, 0.1, SIZE - 16), Vector3.new(-EDGE + 4, 0, 0) } }) do
@@ -177,16 +223,20 @@ for _, wall in ipairs({ { Vector3.new(SIZE + 8, 120, 2), Vector3.new(0, 60, EDGE
 	w.Transparency = 1
 end
 
--- A grid of windows painted on one face of a part (lit warm yellow or dark blue)
-local function windows(part, face, widthStuds, heightStuds, bottomGap, topGap)
+-- A grid of windows painted on one face of a part (lit warm yellow or dark blue).
+-- spacing = studs between windows across (rows are 1 stud further apart); far-away
+-- buildings use wider spacing so the city doesn't need thousands of windows.
+local function windows(part, face, widthStuds, heightStuds, bottomGap, topGap, spacing)
+	spacing = spacing or 6
+	local rowStep = spacing + 1
 	local gui = Instance.new("SurfaceGui")
 	gui.Face = face
 	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
 	gui.PixelsPerStud = 8
 	gui.LightInfluence = 0.3
 	gui.Parent = part
-	local cols = math.max(1, math.floor(widthStuds / 6))
-	local rows = math.max(1, math.floor((heightStuds - bottomGap - topGap) / 7))
+	local cols = math.max(1, math.floor(widthStuds / spacing))
+	local rows = math.max(1, math.floor((heightStuds - bottomGap - topGap) / rowStep))
 	for r = 1, rows do
 		for c = 1, cols do
 			local lit = cityRng:NextNumber() < 0.45
@@ -194,7 +244,7 @@ local function windows(part, face, widthStuds, heightStuds, bottomGap, topGap)
 			win.BorderSizePixel = 0
 			win.AnchorPoint = Vector2.new(0.5, 0.5)
 			win.Size = UDim2.fromScale(0.55 / cols, 3.6 / heightStuds)
-			win.Position = UDim2.fromScale((c - 0.5) / cols, (topGap + (r - 0.5) * 7) / heightStuds)
+			win.Position = UDim2.fromScale((c - 0.5) / cols, (topGap + (r - 0.5) * rowStep) / heightStuds)
 			win.BackgroundColor3 = lit and Color3.fromRGB(255, 222, 150) or Color3.fromRGB(46, 62, 92)
 			win.Parent = gui
 		end
@@ -355,8 +405,20 @@ for side = 1, 4 do
 		tower.Size = Vector3.new(width, height, width)
 		tower.Color = Color3.fromRGB(96, 108, 140):Lerp(Color3.fromRGB(150, 160, 190), cityRng:NextNumber())
 		tower.CFrame = CFrame.lookAt(front, front - dir) * CFrame.new(0, height / 2, width / 2)
-		windows(tower, Enum.NormalId.Front, width, height, 4, 4)
+		windows(tower, Enum.NormalId.Front, width, height, 4, 4, 8)
 	end
+end
+
+-- A ring of distant buildings right behind the shops, so the gaps between buildings show
+-- more city instead of the empty world outside
+local BACKDROP = 172
+for side = 1, 4 do
+	local dir = ({ Vector3.zAxis, -Vector3.zAxis, Vector3.xAxis, -Vector3.xAxis })[side]
+	local length = BACKDROP * 2 + 4
+	local front = CENTER + dir * BACKDROP
+	local wall = makePart(roomFolder, "Backdrop", Vector3.new(length, 70, 4), front, Color3.fromRGB(84, 92, 122))
+	wall.CFrame = CFrame.lookAt(front, front - dir) * CFrame.new(0, 35, 2)
+	windows(wall, Enum.NormalId.Front, length, 70, 4, 4, 10)
 end
 
 -- Torii gate behind the spawn (in the gap of the front row)
@@ -643,7 +705,8 @@ makeSignBoard(lobby, "SummonSign", signPos, MAGIC, "SUMMON", "Walk up to the Wis
 -- ===== Traits Cave (the trait summon spot, front-right area) =====
 -- A rocky cave whose entrance faces the walkway. Walk inside and the trait summon window
 -- pops up (TraitCaveUI checks the invisible TraitCave trigger covering the cave floor).
-local cavePos = CENTER + Vector3.new(85, 0, 55)
+local CAVE_DEPTH = 22 -- how far below the square the cave floor is
+local cavePos = CENTER + Vector3.new(85, -CAVE_DEPTH, 55)
 local cave = Instance.new("Folder")
 cave.Name = "TraitsCave"
 cave.Parent = lobby
@@ -735,7 +798,7 @@ for i, p in ipairs({ { 12, -12 }, { 12, 12 }, { 0, -13 }, { 0, 13 }, { -12, -12 
 	crystal(cavePos + Vector3.new(p[1] - math.sign(p[1]) * 1.2, 0.5, p[2] + 0.8), 1.6, 0.7, color, -p[2] / 40, p[1] / 40)
 end
 for _, sz in ipairs({ -1, 1 }) do
-	crystal(cavePos + Vector3.new(-edge - 3, 0.5, sz * (doorHalf + 2)), 4, 1.2, CAVE_CRYSTALS[2], 0, sz * 0.2, 18)
+	crystal(cavePos + Vector3.new(-edge - 3, 0.5, sz * (doorHalf - 1)), 4, 1.2, CAVE_CRYSTALS[2], 0, sz * 0.2, 18)
 end
 
 -- The floating trait crystal over the cluster
@@ -757,6 +820,45 @@ traitSparkles.Rate = 14
 traitSparkles.Parent = traitCrystal
 
 -- The invisible trigger: standing anywhere inside the cave opens the trait summon window
+-- ===== The way down: an opening in the square, a ramp and a tunnel to the cave's door =====
+do
+	local O = CAVE_OPENING
+	local top = CENTER + Vector3.new(O.X0, 0.4, (O.Z0 + O.Z1) / 2)               -- street level
+	local bottom = CENTER + Vector3.new(O.X1, -CAVE_DEPTH + 0.5, (O.Z0 + O.Z1) / 2) -- the cave's door
+	local length = (bottom - top).Magnitude
+	local ramp = rock("Ramp", Vector3.new(O.Z1 - O.Z0, 1, length),
+		CFrame.lookAt(top, bottom) * CFrame.new(0, -0.5, -length / 2), Color3.fromRGB(96, 88, 104))
+	ramp.Material = Enum.Material.Slate
+
+	-- solid ground under the cave and its doorway
+	rock("CaveGround", Vector3.new(span + 6, 2, span), CFrame.new(cavePos + Vector3.new(-2, -1, 0)), CAVE_ROCK_DARK)
+
+	-- tunnel walls from the cave floor up to the street, either side of the ramp
+	local tunnelLen = O.X1 - O.X0
+	for _, z in ipairs({ O.Z0 - 0.5, O.Z1 + 0.5 }) do
+		rock("TunnelWall", Vector3.new(tunnelLen, CAVE_DEPTH + 0.4, 1),
+			CFrame.new(CENTER + Vector3.new((O.X0 + O.X1) / 2, (0.4 - CAVE_DEPTH) / 2, z)))
+	end
+	-- rock between the top of the cave's front wall and the street
+	rock("DoorFill", Vector3.new(WALL, 4.4, O.Z1 - O.Z0 + 2), CFrame.new(CENTER + Vector3.new(O.X1, -1.8, (O.Z0 + O.Z1) / 2)))
+
+	-- low rock railings around the opening, so nobody falls in from the side
+	for _, z in ipairs({ O.Z0 - 0.6, O.Z1 + 0.6 }) do
+		rock("Railing", Vector3.new(tunnelLen + 1.2, 2.6, 1.2), CFrame.new(CENTER + Vector3.new((O.X0 + O.X1) / 2, 1.7, z)))
+	end
+	rock("Railing", Vector3.new(1.2, 2.6, O.Z1 - O.Z0 + 2.4), CFrame.new(CENTER + Vector3.new(O.X1 + 0.6, 1.7, (O.Z0 + O.Z1) / 2)))
+
+	-- a rocky arch over the top of the ramp, with glowing crystals
+	local mid = (O.Z0 + O.Z1) / 2
+	for _, sz in ipairs({ -1, 1 }) do
+		rock("ArchPillar", Vector3.new(3.4, 15, 3.4),
+			CFrame.new(CENTER + Vector3.new(O.X0 - 1, 7.9, mid + sz * 8.4)) * CFrame.Angles(0, math.rad(15 * sz), math.rad(-4 * sz)))
+		crystal(CENTER + Vector3.new(O.X0 - 3.5, 0.4, mid + sz * 10.5), 5, 1.4, CAVE_CRYSTALS[(sz + 3) % 3 + 1], 0, sz * 0.25, 22)
+	end
+	rock("ArchTop", Vector3.new(4, 3.2, 22), CFrame.new(CENTER + Vector3.new(O.X0 - 1, 16.4, mid)) * CFrame.Angles(math.rad(3), 0, 0), CAVE_ROCK_DARK)
+	crystal(CENTER + Vector3.new(O.X0 - 1, 17.8, mid), 3.5, 1.2, CAVE_CRYSTALS[1], 0, 0, 24)
+end
+
 local caveTrigger = makePart(lobby, "TraitCave", Vector3.new(CAVE_INNER * 2, 1, CAVE_INNER * 2), cavePos + Vector3.new(0, 0.9, 0), CAVE_CRYSTALS[1])
 caveTrigger.Transparency = 1
 caveTrigger.CanCollide = false
@@ -771,10 +873,11 @@ game:GetService("RunService").Heartbeat:Connect(function(dt)
 end)
 
 -- The sign stands beside the entrance and faces the spawn
-local caveSignPos = cavePos + Vector3.new(-26, 0, 26)
+-- (at street level, beside the ramp, since the cave itself is underground)
+local caveSignPos = CENTER + Vector3.new(44, 0, 78)
 local caveToSpawn = Vector3.new(spawn.Position.X - caveSignPos.X, 0, spawn.Position.Z - caveSignPos.Z).Unit
 makeSignBoard(lobby, "TraitCaveSign", caveSignPos, CAVE_CRYSTALS[1], "TRAITS CAVE",
-	"Walk inside to summon traits onto your units!", caveToSpawn, 13)
+	"Head down the ramp to summon traits onto your units!", caveToSpawn, 13)
 
 -- ===== Five team queue pads (in front of the station) =====
 for i = 1, NUM_PADS do
