@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: health bars and their HP numbers are named "HealthBar" and
---  "HPText" so the Settings popup can hide them on a player's screen)
+-- (replaces the earlier version: enemy health bars never get smaller than a readable size on
+--  screen; up close they still scale with the enemy)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -236,16 +236,19 @@ local function makeTraitBadge(parent, traitName, offsetY)
 end
 
 -- A health bar floating over an enemy. Returns a function that updates it.
--- Sized in studs, not pixels (like the trait icons over units), so it stays the same size in
--- the world and shrinks with distance instead of staying the same size on screen.
-local HEALTH_BAR_STUDS = Vector2.new(3.2, 0.55) -- normal enemies: width, height
+-- Its size is studs PLUS a few pixels: up close it scales with the enemy like the trait icons
+-- over units, and from far away it never shrinks below the pixel part, so it stays readable.
+local HEALTH_BAR_STUDS = Vector2.new(3.4, 0.6)  -- normal enemies: width, height in studs...
+local HEALTH_BAR_MIN_PX = Vector2.new(40, 9)    -- ...plus at least this many pixels
 local BOSS_BAR_STUDS = Vector2.new(6.5, 1.4)    -- bosses: their name on top, then the bar
+local BOSS_BAR_MIN_PX = Vector2.new(90, 22)
 local function makeHealthBar(parent, maxHp, offsetY, name)
 	local wide = name ~= nil
 	local studs = wide and BOSS_BAR_STUDS or HEALTH_BAR_STUDS
+	local minPx = wide and BOSS_BAR_MIN_PX or HEALTH_BAR_MIN_PX
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "HealthBar" -- the Settings popup can hide these on your screen
-	gui.Size = UDim2.fromScale(studs.X, studs.Y)
+	gui.Size = UDim2.new(studs.X, minPx.X, studs.Y, minPx.Y)
 	gui.StudsOffset = Vector3.new(0, offsetY, 0)
 	gui.AlwaysOnTop = true
 	gui.LightInfluence = 0
