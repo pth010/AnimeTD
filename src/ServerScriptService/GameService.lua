@@ -1,7 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: winning a level also pays Trait Shards, see LevelData.WinShards)
+-- (replaces the earlier version: placing a unit uses the copy you have on your team)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -592,16 +592,16 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 	end
 
 	local profile = PlayerData.Get(player)
-	local trait = profile and profile.Traits[unitName]
-	local xp = profile and profile.XP[unitName] or 0
-	local stars = profile and profile.Stars[unitName] or 0
+	-- the copy of this unit on the player's team (each copy has its own trait, level and stars)
+	local unit = profile and typeof(unitName) == "string" and PlayerData.EquippedUnit(profile, unitName)
+	if not unit then
+		return { Success = false, Error = "That unit isn't on your team." }
+	end
+	local trait, xp, stars = unit.Trait, unit.XP, unit.Stars
 	-- base stats with the unit's trait, level and stars applied
 	local stats = ProgressData.Apply(TraitData.StatsFor(unitName, trait), xp, stars)
-	if not profile or not stats or not profile.Units[unitName] then
-		return { Success = false, Error = "You don't own that unit." }
-	end
-	if not table.find(profile.Equipped, unitName) then
-		return { Success = false, Error = "That unit isn't on your team." }
+	if not stats then
+		return { Success = false, Error = "Unknown unit." }
 	end
 	if (player:GetAttribute("Cash") or 0) < stats.Cost then
 		return { Success = false, Error = "Not enough cash." }

@@ -1,7 +1,8 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: TraitCaveUI
--- (replaces the earlier version: trait summons cost Trait Shards, shown in a pill up top)
+-- (replaces the earlier version: lists every unit you own separately, since each copy
+--  has its own trait now)
 -- The Traits Cave window: pick one of your units, then summon a trait onto it for Trait
 -- Shards (won from levels).
 -- The unit keeps that trait until you summon on it again (the new trait replaces the old).
@@ -13,6 +14,7 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
+local ProgressData = require(ReplicatedStorage:WaitForChild("ProgressData"))
 local inventoryRemote = ReplicatedStorage:WaitForChild("InventoryRemote")
 local player = Players.LocalPlayer
 
@@ -390,18 +392,35 @@ oddsBtn.Activated:Connect(function() odds.Visible = true end)
 oddsClose.Activated:Connect(function() odds.Visible = false end)
 
 -- ===== State =====
-local selected = nil     -- the picked unit's name
+local selected = nil     -- the picked unit's id
 local confirming = false -- true after one click on Summon over a Legendary or Mythic trait
 local busy = false       -- waiting on the server or playing the roulette
 local ringColor = TEAL   -- the circle's current color (follows the trait's tier)
 local spinSpeed = 40     -- degrees per second; the roulette speeds it up
 
-local function parseCounts()
-	local counts = {}
-	for name, n in string.gmatch(player:GetAttribute("UnitCounts") or "", "([^;=]+)=(%d+)") do
-		counts[name] = tonumber(n)
-	end
-	return counts
+local rarityRank = {}
+for i, r in ipairs(UnitData.Rarities) do
+	rarityRank[r.Name] = i
+end
+
+-- Every unit you own, rarest and strongest first, plus a lookup by id
+local function readUnits()
+	local list, byId = UnitData.ParseUnits(player:GetAttribute("Units"))
+	table.sort(list, function(a, b)
+		local ra, rb = rarityRank[UnitData.UnitRarity[a.Name]], rarityRank[UnitData.UnitRarity[b.Name]]
+		if ra ~= rb then return ra > rb end
+		if a.Name ~= b.Name then return a.Name < b.Name end
+		if a.Stars ~= b.Stars then return a.Stars > b.Stars end
+		if a.XP ~= b.XP then return a.XP > b.XP end
+		return a.Id < b.Id
+	end)
+	return list, byId
+end
+
+local function selectedUnit()
+	if not selected then return nil end
+	local _, byId = UnitData.ParseUnits(player:GetAttribute("Units"))
+	return byId[selected]
 end
 
 local function setMessage(text, color)
@@ -410,7 +429,8 @@ local function setMessage(text, color)
 end
 
 local function currentTrait()
-	return selected and TraitData.Get(TraitData.Parse(player:GetAttribute("UnitTraits"))[selected]) or nil
+	local u = selectedUnit()
+	return u and TraitData.Get(u.Trait) or nil
 end
 
 -- Legendary and Mythic traits ask before being replaced
@@ -503,9 +523,10 @@ local function refreshPicked()
 		unitRarity.TextColor3 = SUBTLE
 		traitCaption.Text = ""
 	else
-		local rarityName = UnitData.UnitRarity[selected]
-		unitName.Text = selected
-		unitRarity.Text = rarityName
+		local u = selectedUnit()
+		local rarityName = u and UnitData.UnitRarity[u.Name] or ""
+		unitName.Text = u and u.Name or ""
+		unitRarity.Text = u and string.format("%s  ·  Lv %d %s", rarityName, ProgressData.LevelFromXP(u.XP), string.rep("★", u.Stars)) or ""
 		unitRarity.TextColor3 = UnitData.RarityColor[rarityName] or SUBTLE
 		traitCaption.Text = "CURRENT TRAIT"
 	end
@@ -516,8 +537,9 @@ end
 
 local refreshUnits -- defined below (rows call it when clicked)
 
-local function makeRow(name, rarity, traitName_, order)
-	local isPicked = name == selected
+local function makeRow(u, rarity, order)
+	local name, traitName_ = u.Name, u.Trait
+	local isPicked = u.Id == selected
 	local r = Instance.new("TextButton")
 	r.LayoutOrder = order
 	r.Size = UDim2.new(1, 0, 0, 52)
@@ -543,7 +565,7 @@ local function makeRow(name, rarity, traitName_, order)
 	local n = label(r, name, UDim2.fromOffset(52, 8), UDim2.new(1, -150, 0, 18), 14, WHITE, Enum.Font.GothamBold)
 	n.TextXAlignment = Enum.TextXAlignment.Left
 	n.TextTruncate = Enum.TextTruncate.AtEnd
-	local rar = label(r, rarity.Name, UDim2.fromOffset(52, 27), UDim2.new(1, -150, 0, 14), 11, rarity.Color, Enum.Font.Gotham)
+	local rar = label(r, string.format("%s  ·  Lv %d %s", rarity.Name, ProgressData.LevelFromXP(u.XP), string.rep("★", u.Stars)), UDim2.fromOffset(52, 27), UDim2.new(1, -150, 0, 14), 11, rarity.Color, Enum.Font.Gotham)
 	rar.TextXAlignment = Enum.TextXAlignment.Left
 
 	-- trait pill
@@ -560,7 +582,7 @@ local function makeRow(name, rarity, traitName_, order)
 
 	r.Activated:Connect(function()
 		if busy then return end
-		selected = name
+		selected = u.Id
 		confirming = false
 		setMessage("")
 		refreshUnits()
@@ -572,25 +594,17 @@ refreshUnits = function()
 	for _, c in ipairs(unitList:GetChildren()) do
 		if c:IsA("TextButton") or c:IsA("Frame") then c:Destroy() end
 	end
-	local counts = parseCounts()
-	local traits = TraitData.Parse(player:GetAttribute("UnitTraits"))
-	if selected and not counts[selected] then
+	local list, byId = readUnits()
+	if selected and not byId[selected] then
 		selected = nil -- deleted or fused away
 		confirming = false
 	end
 
 	local order, withTrait = 0, 0
-	for i = #UnitData.Rarities, 1, -1 do -- rarest first
-		local rarity = UnitData.Rarities[i]
-		local list = table.clone(UnitData.Units[rarity.Name])
-		table.sort(list)
-		for _, name in ipairs(list) do
-			if counts[name] then
-				order += 1
-				if traits[name] then withTrait += 1 end
-				makeRow(name, rarity, traits[name], order)
-			end
-		end
+	for _, u in ipairs(list) do
+		order += 1
+		if u.Trait then withTrait += 1 end
+		makeRow(u, UnitData.Rarities[rarityRank[UnitData.UnitRarity[u.Name]]], order)
 	end
 	unitsCount.Text = order > 0 and string.format("%d / %d with traits", withTrait, order) or ""
 	if order == 0 then
@@ -669,13 +683,14 @@ summonBtn.Activated:Connect(function()
 	setMessage("")
 	refreshSummonButton()
 	local target = selected
+	local targetName = selectedUnit() and selectedUnit().Name or "Your unit"
 	local ok, res = pcall(function()
 		return inventoryRemote:InvokeServer("SummonTrait", target)
 	end)
 	local trait = ok and type(res) == "table" and res.Success and TraitData.Get(res.Trait)
 	if trait then
 		roulette(trait)
-		setMessage(string.format("%s got %s %s!", target, trait.Tier, trait.Name), trait.Color)
+		setMessage(string.format("%s got %s %s!", targetName, trait.Tier, trait.Name), trait.Color)
 	elseif not ok or type(res) ~= "table" then
 		setMessage("Couldn't reach the server. Try again.", ERROR_COLOR)
 	else
@@ -707,7 +722,7 @@ local function scheduleRefresh()
 		refreshPicked()
 	end)
 end
-for _, attribute in ipairs({ "UnitCounts", "UnitTraits", "Shards" }) do
+for _, attribute in ipairs({ "Units", "Shards" }) do
 	player:GetAttributeChangedSignal(attribute):Connect(scheduleRefresh)
 end
 refreshUnits()

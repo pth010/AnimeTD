@@ -1,8 +1,8 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: UnitData
--- (replaces the earlier version: adds two cash units - Coin Merchant (Epic) and Fortune
---  Maiden (Legendary) - that don't attack but pay you cash after every wave)
+-- (replaces the earlier version: adds inventory slots and slot game passes, and
+--  UnitData.ParseUnits for the per-unit inventory)
 
 local UnitData = {}
 
@@ -96,6 +96,18 @@ UnitData.PlacementLimits = {
 -- Units placed on the mountain's high ground get this much extra range
 UnitData.HighGroundRangeMult = 1.3
 
+-- ===== INVENTORY SLOTS =====
+-- Every unit you own takes one slot. Summoning stops when you're full (a x10 needs 10 free).
+UnitData.BaseSlots = 100
+
+-- Game passes that add slots. Make each pass in the Creator Dashboard (your experience >
+-- Monetization > Passes) and paste its ID here. Passes left at 0 are ignored, and the
+-- Inventory's "+ Slots" button offers the first pass the player doesn't own yet.
+UnitData.SlotPasses = {
+	{ Id = 0, Slots = 50,  Name = "+50 Unit Slots" },
+	{ Id = 0, Slots = 100, Name = "+100 Unit Slots" },
+}
+
 -- Lookups built automatically
 UnitData.UnitRarity = {}
 UnitData.RarityColor = {}
@@ -107,6 +119,29 @@ for rarityName, list in pairs(UnitData.Units) do
 	for _, unitName in ipairs(list) do
 		UnitData.UnitRarity[unitName] = rarityName
 	end
+end
+
+-- Reads the "Units" player attribute: one entry per unit you own,
+-- "id|name|trait|xp|stars|locked" joined by ";" (trait is empty when the unit has none).
+-- Returns a list of { Id, Name, Trait, XP, Stars, Locked } and a lookup by Id.
+function UnitData.ParseUnits(text)
+	local list, byId = {}, {}
+	for entry in string.gmatch(text or "", "[^;]+") do
+		local id, name, trait, xp, stars, locked = string.match(entry, "^(%d+)|([^|]*)|([^|]*)|(%d+)|(%d+)|(%d)$")
+		if id and UnitData.UnitRarity[name] then
+			local u = {
+				Id = tonumber(id),
+				Name = name,
+				Trait = trait ~= "" and trait or nil,
+				XP = tonumber(xp),
+				Stars = tonumber(stars),
+				Locked = locked == "1",
+			}
+			table.insert(list, u)
+			byId[u.Id] = u
+		end
+	end
+	return list, byId
 end
 
 function UnitData.GetPlacementLimit(unitName)
