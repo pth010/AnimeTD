@@ -1,8 +1,8 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: InventoryUI
--- (replaces the earlier version: the team bar and Inventory button can be moved and resized
---  in the Screen Layout panel, see LayoutUI)
+-- (replaces the earlier version: the inventory window sits higher, in the space above the
+--  team bar, so the two don't overlap)
 -- The team bar stays on screen in matches too, as the unit hotbar: click a slot (or press
 -- 1-6) to place that unit; slots show cost and placed/limit.
 -- The team bar runs along the bottom of the screen. In the lobby, "Put on team" asks you to
@@ -124,7 +124,10 @@ gui.Parent = player:WaitForChild("PlayerGui")
 local openBtn = button(gui, "Inventory", UDim2.new(0, 10, 0.5, -20), UDim2.fromOffset(130, 40), Color3.fromRGB(70, 110, 220), 18)
 openBtn.Name = "InventoryButton" -- LayoutUI finds it by this name
 
-local window = frame(gui, UDim2.fromScale(0.5, 0.5), UDim2.fromOffset(WIDTH, HEIGHT), PANEL)
+-- The team bar takes about this much of the bottom of the screen; the window centers in the
+-- space above it (and shrinks to fit there on small screens)
+local BAR_SPACE = 150
+local window = frame(gui, UDim2.new(0.5, 0, 0.5, -BAR_SPACE / 2), UDim2.fromOffset(WIDTH, HEIGHT), PANEL)
 window.AnchorPoint = Vector2.new(0.5, 0.5)
 window.Visible = false
 corner(window, 14)
@@ -133,7 +136,7 @@ local fit = Instance.new("UIScale")
 fit.Parent = window
 local function fitToScreen()
 	local vp = workspace.CurrentCamera.ViewportSize
-	fit.Scale = math.min(1, (vp.X - 20) / WIDTH, (vp.Y - 40) / HEIGHT)
+	fit.Scale = math.min(1, (vp.X - 20) / WIDTH, (vp.Y - 40 - BAR_SPACE) / HEIGHT)
 end
 fitToScreen()
 workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(fitToScreen)
