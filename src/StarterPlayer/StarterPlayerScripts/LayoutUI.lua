@@ -1,9 +1,9 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: LayoutUI
--- (replaces the earlier version: the gear button opens a Settings popup, in the lobby and in
---  matches; Screen Layout is one of its options)
--- The Settings popup (gear button, always on screen):
+-- (replaces the earlier version: the gear icon didn't show up, so Settings is now a text
+--  button like Inventory, in the top right corner)
+-- The Settings popup (Settings button in the top right, always on screen):
 --   * Screen Layout: move and resize the team bar, the Inventory button and the
 --     Gems / Gold / Shards counter with sliders
 --   * Trait icons over units, enemy health bars, HP numbers on health bars: on / off
@@ -151,7 +151,9 @@ gui.ResetOnSpawn = false
 gui.DisplayOrder = 5
 gui.Parent = playerGui
 
-local gear = button(gui, "⚙", UDim2.new(0, 10, 0.5, 28), UDim2.fromOffset(40, 40), GLASS, 22)
+-- Top right, just left of the match speed buttons (SpeedUI, 204 wide) so they never overlap
+local gear = button(gui, "Settings", UDim2.new(1, -224, 0, 10), UDim2.fromOffset(104, 34), Color3.fromRGB(70, 110, 220), 15)
+gear.AnchorPoint = Vector2.new(1, 0)
 gear.Name = "SettingsButton"
 
 local PW, PH = 360, 330
