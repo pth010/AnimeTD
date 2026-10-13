@@ -155,6 +155,7 @@ gui.Parent = playerGui
 local gear = button(gui, "Settings", UDim2.new(1, -224, 0, 10), UDim2.fromOffset(104, 34), Color3.fromRGB(70, 110, 220), 15)
 gear.AnchorPoint = Vector2.new(1, 0)
 gear.Name = "SettingsButton"
+print("[LayoutUI] Settings button ready (top right of the screen)")
 
 local PW, PH = 360, 330
 local panel = Instance.new("Frame")
