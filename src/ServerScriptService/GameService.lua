@@ -1,7 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: placing a unit uses the copy you have on your team)
+-- (replaces the earlier version: placed units show their trait's icon above their name)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -194,6 +194,21 @@ local function makeNameTag(parent, text, offsetY)
 	label.Text = text
 	label.Parent = gui
 	return label
+end
+
+-- The unit's trait icon floating just above its name tag (the same icon as in the menus)
+local function makeTraitBadge(parent, traitName, offsetY)
+	local icon = TraitData.MakeIcon(traitName, 30)
+	if not icon then return nil end
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "TraitBadge"
+	gui.Size = UDim2.fromOffset(30, 30)
+	gui.StudsOffset = Vector3.new(0, offsetY, 0)
+	gui.AlwaysOnTop = true
+	gui.MaxDistance = 200
+	gui.Parent = parent
+	icon.Parent = gui
+	return gui
 end
 
 -- A health bar floating over an enemy. Returns a function that updates it.
@@ -490,8 +505,9 @@ local function refreshUnit(u)
 		part:SetAttribute("Income", farmIncome(u, u.Level))
 		part:SetAttribute("NextIncome", farmIncome(u, u.Level + 1))
 	end
-	u.Label.Text = string.format("%s%s Lv%d%s%s", u.Stars > 0 and (string.rep("★", u.Stars) .. " ") or "", part.Name, u.Level,
-		u.Trait and (" [" .. u.Trait .. "]") or "", u.HighGround and " (High)" or "")
+	-- the trait shows as an icon above this tag (see makeTraitBadge), so it isn't in the text
+	u.Label.Text = string.format("%s%s Lv%d%s", u.Stars > 0 and (string.rep("★", u.Stars) .. " ") or "", part.Name, u.Level,
+		u.HighGround and " (High)" or "")
 end
 
 -- Cash units pay out when a wave is cleared, with a "+$250" popping up over each one
@@ -656,6 +672,9 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 	part.CanCollide = false
 	part.Position = spot + Vector3.new(0, 2.8, 0)
 	local label = makeNameTag(part, unitName, 3.6)
+	if trait then
+		makeTraitBadge(part, trait, 4.9)
+	end
 
 	-- Start out facing the nearest bit of path
 	local model = UnitModels.Build(unitName)
