@@ -1,6 +1,7 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: ResultsUI
+-- (replaces the earlier version: also shows the Trait Shards you won)
 -- The end-of-match screen (victory or defeat). Shows the waves reached, the rewards you
 -- earned and a damage summary for every player in the match, with two buttons:
 --   PLAY AGAIN       - the team replays once everyone left on the screen has picked it
@@ -21,6 +22,7 @@ local PANEL_LIGHT = Color3.fromRGB(34, 31, 56)
 local SUBTLE = Color3.fromRGB(185, 180, 215)
 local GOLD = Color3.fromRGB(255, 205, 70)
 local GEM = Color3.fromRGB(130, 220, 255)
+local SHARD = Color3.fromRGB(80, 230, 220) -- same as TraitData.ShardColor
 local WIN_COLOR = Color3.fromRGB(255, 205, 70)
 local LOSE_COLOR = Color3.fromRGB(235, 80, 80)
 
@@ -101,8 +103,9 @@ rewards.Size = UDim2.new(1, -40, 0, 44)
 rewards.BackgroundColor3 = PANEL_LIGHT
 rewards.Parent = panel
 corner(rewards, 10)
-local goldText = label(rewards, "", UDim2.fromScale(0, 0), UDim2.fromScale(0.5, 1), 22, GOLD, Enum.Font.GothamBlack)
-local gemsText = label(rewards, "", UDim2.fromScale(0.5, 0), UDim2.fromScale(0.5, 1), 22, GEM, Enum.Font.GothamBlack)
+local goldText = label(rewards, "", UDim2.fromScale(0, 0), UDim2.fromScale(1 / 3, 1), 20, GOLD, Enum.Font.GothamBlack)
+local gemsText = label(rewards, "", UDim2.fromScale(1 / 3, 0), UDim2.fromScale(1 / 3, 1), 20, GEM, Enum.Font.GothamBlack)
+local shardsText = label(rewards, "", UDim2.fromScale(2 / 3, 0), UDim2.fromScale(1 / 3, 1), 20, SHARD, Enum.Font.GothamBlack)
 
 -- Damage summary
 label(panel, "DAMAGE SUMMARY", UDim2.fromOffset(24, 152), UDim2.fromOffset(240, 20), 14, SUBTLE, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
@@ -222,6 +225,7 @@ local function show(data)
 
 	goldText.Text = (data.Gold or 0) > 0 and ("+" .. commas(data.Gold) .. " Gold") or "+0 Gold"
 	gemsText.Text = "+" .. commas(data.Gems or 0) .. " Gems"
+	shardsText.Text = "+" .. commas(data.Shards or 0) .. " Shards"
 
 	for _, c in ipairs(list:GetChildren()) do
 		if c:IsA("Frame") then c:Destroy() end

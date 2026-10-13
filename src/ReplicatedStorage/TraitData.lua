@@ -1,10 +1,11 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: TraitData
--- (replaces the earlier version: traits are summoned onto a unit in the Traits Cave)
+-- (replaces the earlier version: trait summons cost Trait Shards instead of Gold)
 -- Unit traits. In the lobby's Traits Cave, pick one of your units and summon a trait onto
--- it for Gold. The trait boosts that unit everywhere it is placed, and it stays until you
--- summon on that unit again (the new trait replaces the old one).
+-- it for Trait Shards (won from levels, see LevelData.WinShards). The trait boosts that unit
+-- everywhere it is placed, and it stays until you summon on that unit again (the new trait
+-- replaces the old one).
 --
 -- Each trait's Chance is the % chance to land it on one summon (all chances add up to 100).
 -- The bonuses are multipliers on the unit's stats:
@@ -19,7 +20,8 @@ local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 
 local TraitData = {}
 
-TraitData.SummonCost = 300 -- Gold for one trait summon in the Traits Cave
+TraitData.SummonCost = 1 -- Trait Shards for one trait summon in the Traits Cave
+TraitData.ShardColor = Color3.fromRGB(80, 230, 220) -- how Trait Shards show up in every UI
 
 TraitData.Tiers = {
 	{ Name = "Common",    Color = Color3.fromRGB(190, 190, 190) },

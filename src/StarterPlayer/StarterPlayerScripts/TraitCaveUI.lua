@@ -1,9 +1,9 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: TraitCaveUI
--- (replaces the earlier version: a redesigned window with a spinning summoning circle,
---  a trait roulette when you summon, stat chips and a burst for Legendary / Mythic traits)
--- The Traits Cave window: pick one of your units, then summon a trait onto it for Gold.
+-- (replaces the earlier version: trait summons cost Trait Shards, shown in a pill up top)
+-- The Traits Cave window: pick one of your units, then summon a trait onto it for Trait
+-- Shards (won from levels).
 -- The unit keeps that trait until you summon on it again (the new trait replaces the old).
 -- Pops up when you walk into the lobby's Traits Cave and closes when you walk out (or press X).
 
@@ -25,6 +25,7 @@ local TEAL = Color3.fromRGB(80, 230, 220)
 local PURPLE = Color3.fromRGB(170, 100, 255)
 local PINK = Color3.fromRGB(255, 90, 170)
 local GOLD = Color3.fromRGB(255, 205, 90)
+local SHARD = TraitData.ShardColor
 local SUBTLE = Color3.fromRGB(170, 185, 210)
 local DIM = Color3.fromRGB(110, 120, 145)
 local ERROR_COLOR = Color3.fromRGB(255, 130, 130)
@@ -92,6 +93,15 @@ local function withCommas(n)
 	local s = tostring(math.floor(n))
 	local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
 	return (out:gsub("^,", ""))
+end
+
+-- "1 Trait Shard" / "12 Trait Shards"
+local function shardText(n)
+	return withCommas(n) .. (n == 1 and " Trait Shard" or " Trait Shards")
+end
+
+local function shards()
+	return player:GetAttribute("Shards") or 0
 end
 
 local function darker(color, amount)
@@ -195,18 +205,18 @@ corner(shrine, 14)
 stroke(shrine, WHITE, 1, 0.88)
 shrine.ClipsDescendants = true
 
-local goldPill = frame(shrine, UDim2.new(1, -132, 0, 12), UDim2.fromOffset(120, 26), darker(GOLD, 0.7))
-corner(goldPill, "round")
-stroke(goldPill, GOLD, 1.5, 0.3)
-local goldDot = frame(goldPill, UDim2.fromOffset(9, 8), UDim2.fromOffset(10, 10), GOLD)
-corner(goldDot, "round")
-local goldLabel = label(goldPill, "", UDim2.fromOffset(24, 0), UDim2.new(1, -30, 1, 0), 13, GOLD, Enum.Font.GothamBlack)
-goldLabel.TextXAlignment = Enum.TextXAlignment.Left
+local shardPill = frame(shrine, UDim2.new(1, -150, 0, 12), UDim2.fromOffset(138, 26), darker(SHARD, 0.72))
+corner(shardPill, "round")
+stroke(shardPill, SHARD, 1.5, 0.3)
+local shardIcon = diamond(shardPill, 10, SHARD)
+shardIcon.Position = UDim2.fromOffset(15, 13)
+local shardLabel = label(shardPill, "", UDim2.fromOffset(26, 0), UDim2.new(1, -32, 1, 0), 12, SHARD, Enum.Font.GothamBlack)
+shardLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-local unitName = label(shrine, "", UDim2.fromOffset(16, 10), UDim2.new(1, -160, 0, 24), 20, WHITE, Enum.Font.GothamBlack)
+local unitName = label(shrine, "", UDim2.fromOffset(16, 10), UDim2.new(1, -176, 0, 24), 20, WHITE, Enum.Font.GothamBlack)
 unitName.TextXAlignment = Enum.TextXAlignment.Left
 unitName.TextTruncate = Enum.TextTruncate.AtEnd
-local unitRarity = label(shrine, "", UDim2.fromOffset(16, 34), UDim2.new(1, -160, 0, 16), 12, SUBTLE)
+local unitRarity = label(shrine, "", UDim2.fromOffset(16, 34), UDim2.new(1, -176, 0, 16), 12, SUBTLE)
 unitRarity.TextXAlignment = Enum.TextXAlignment.Left
 
 -- the summoning circle
@@ -322,7 +332,7 @@ corner(odds, 18)
 gradient(odds, { Color3.fromRGB(12, 26, 38), Color3.fromRGB(34, 16, 54) }, 135)
 local oddsTitle = label(odds, "TRAIT ODDS", UDim2.fromOffset(0, 14), UDim2.new(1, 0, 0, 30), 24, WHITE, Enum.Font.GothamBlack)
 gradient(oddsTitle, { Color3.fromRGB(170, 255, 245), Color3.fromRGB(215, 175, 255) }, 0)
-label(odds, string.format("Each summon costs %d Gold and replaces the unit's current trait.", TraitData.SummonCost),
+label(odds, string.format("Each summon costs %s and replaces the unit's current trait.", shardText(TraitData.SummonCost)),
 	UDim2.fromOffset(16, 44), UDim2.new(1, -32, 0, 18), 13, SUBTLE, Enum.Font.Gotham)
 local oddsClose = close:Clone()
 oddsClose.Parent = odds
@@ -458,7 +468,6 @@ end
 
 local function refreshSummonButton()
 	local trait = currentTrait()
-	local gold = player:GetAttribute("Gold") or 0
 	if busy then
 		summonText.Text = "SUMMONING..."
 		summonSub.Text = ""
@@ -471,19 +480,19 @@ local function refreshSummonButton()
 		summonText.Text = "REPLACE " .. string.upper(trait.Name) .. "?"
 		summonSub.Text = "Click again to summon anyway"
 		summonGradient.Color = ColorSequence.new(Color3.fromRGB(220, 100, 60), Color3.fromRGB(200, 50, 100))
-	elseif gold < TraitData.SummonCost then
+	elseif shards() < TraitData.SummonCost then
 		summonText.Text = "SUMMON TRAIT"
-		summonSub.Text = string.format("Need %s Gold", withCommas(TraitData.SummonCost))
+		summonSub.Text = "Out of Trait Shards. Win levels to earn more"
 		summonGradient.Color = ColorSequence.new(Color3.fromRGB(70, 78, 100), Color3.fromRGB(60, 64, 88))
 	else
 		summonText.Text = "SUMMON TRAIT"
-		summonSub.Text = string.format("%s Gold", withCommas(TraitData.SummonCost))
+		summonSub.Text = shardText(TraitData.SummonCost)
 		summonGradient.Color = ColorSequence.new(TEAL, PURPLE)
 	end
 end
 
 local function refreshPicked()
-	goldLabel.Text = withCommas(player:GetAttribute("Gold") or 0) .. " Gold"
+	shardLabel.Text = shardText(shards())
 	if busy then
 		refreshSummonButton()
 		return -- the roulette owns the circle right now
@@ -643,8 +652,8 @@ summonBtn.Activated:Connect(function()
 		setMessage("Pick one of your units on the left first.", ERROR_COLOR)
 		return
 	end
-	if (player:GetAttribute("Gold") or 0) < TraitData.SummonCost then
-		setMessage(string.format("You need %s Gold to summon a trait.", withCommas(TraitData.SummonCost)), ERROR_COLOR)
+	if shards() < TraitData.SummonCost then
+		setMessage("You're out of Trait Shards. Win levels to earn more.", ERROR_COLOR)
 		return
 	end
 	-- don't throw away a great trait by accident
@@ -675,14 +684,14 @@ summonBtn.Activated:Connect(function()
 	busy = false
 	refreshUnits()
 	refreshSummonButton()
-	goldLabel.Text = withCommas(player:GetAttribute("Gold") or 0) .. " Gold"
+	shardLabel.Text = shardText(shards())
 end)
 
 close.Activated:Connect(function()
 	window.Visible = false
 end)
 
--- Rebuild once per frame when your units, traits or Gold change
+-- Rebuild once per frame when your units, traits or Trait Shards change
 -- (held back while the roulette plays, so the list doesn't give the result away)
 local queued = false
 local function scheduleRefresh()
@@ -691,14 +700,14 @@ local function scheduleRefresh()
 	task.defer(function()
 		queued = false
 		if busy then
-			goldLabel.Text = withCommas(player:GetAttribute("Gold") or 0) .. " Gold"
+			shardLabel.Text = shardText(shards())
 			return
 		end
 		refreshUnits()
 		refreshPicked()
 	end)
 end
-for _, attribute in ipairs({ "UnitCounts", "UnitTraits", "Gold" }) do
+for _, attribute in ipairs({ "UnitCounts", "UnitTraits", "Shards" }) do
 	player:GetAttributeChangedSignal(attribute):Connect(scheduleRefresh)
 end
 refreshUnits()

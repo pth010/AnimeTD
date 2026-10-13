@@ -1,7 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: InventoryService
--- (replaces the earlier version: traits are summoned onto units in the Traits Cave)
+-- (replaces the earlier version: trait summons cost Trait Shards)
 -- Handles every button in the inventory. The server checks everything,
 -- so a locked unit can never be deleted by a hacked client.
 
@@ -19,7 +19,7 @@ remote.Parent = ReplicatedStorage
 --   "Equip",      unitName,   true/false   (only while auto-equip is off)
 --   "AutoEquip",  "",         true/false
 --   "AutoDelete", rarityName, true/false
---   "SummonTrait", unitName                (Traits Cave: replaces the unit's trait, costs Gold)
+--   "SummonTrait", unitName                (Traits Cave: replaces the unit's trait, costs Trait Shards)
 --   "Fuse",       targetName, { [unitName] = copies }   (feeds other units in for XP)
 --   "Evolve",     unitName                 (uses extra copies + Gold, see ProgressData)
 remote.OnServerInvoke = function(player, action, name, arg)

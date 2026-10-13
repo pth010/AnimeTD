@@ -439,7 +439,8 @@ odds.Parent = frame
 Instance.new("UICorner", odds).CornerRadius = UDim.new(0, 12)
 
 plainLabel(odds, "Trait Odds", UDim2.fromOffset(0, 8), UDim2.new(1, 0, 0, 30), 22)
-plainLabel(odds, string.format("Summon in the Traits Cave: %d Gold each, replaces the unit's current trait.", TraitData.SummonCost),
+plainLabel(odds, string.format("Summon in the Traits Cave: %d Trait Shard%s each, replaces the unit's current trait.",
+	TraitData.SummonCost, TraitData.SummonCost == 1 and "" or "s"),
 	UDim2.fromOffset(10, 38), UDim2.new(1, -20, 0, 20), 14, Color3.fromRGB(200, 200, 220)).Font = Enum.Font.Gotham
 
 local oddsClose = Instance.new("TextButton")

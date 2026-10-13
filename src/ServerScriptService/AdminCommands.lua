@@ -8,6 +8,8 @@
 --   !setcash 5000           set your in-match cash to exactly 5000
 --   !gold 5000              add 5000 gold (main-game currency, saved)
 --   !setgold 5000           set your gold to exactly 5000
+--   !shards 20              add 20 Trait Shards (Traits Cave currency, saved)
+--   !setshards 20           set your Trait Shards to exactly 20
 --   !resetpity              set your summon pity back to 0
 --   !unit Starfall Kitsune  give yourself one copy of a unit
 --   !unit frost mage 3      give yourself 3 copies (names aren't case-sensitive,
@@ -15,7 +17,7 @@
 --   !trait blade novice lord  put a trait on a unit you own ("!trait blade novice none" removes it)
 --   !xp frost mage 5000     give a unit you own fusion XP (levels it up)
 --   !stars frost mage 3     set a unit's evolution stars (0-3)
--- Negative numbers work for gems, gold and cash (e.g. "!gems -500").
+-- Negative numbers work for gems, gold, shards and cash (e.g. "!gems -500").
 -- Results and mistakes are printed in the Output window.
 --
 -- Who can use them: everyone while testing in Studio, and in the live game only the
@@ -103,6 +105,20 @@ function commands.setgold(player, args)
 	local profile = PlayerData.Get(player)
 	if not profile then return "your data is still loading" end
 	PlayerData.AddGold(player, amount - profile.Gold)
+end
+
+function commands.shards(player, args)
+	local amount = readNumber(args)
+	if not amount then return "usage: !shards <number>" end
+	PlayerData.AddShards(player, amount)
+end
+
+function commands.setshards(player, args)
+	local amount = readNumber(args)
+	if not amount then return "usage: !setshards <number>" end
+	local profile = PlayerData.Get(player)
+	if not profile then return "your data is still loading" end
+	PlayerData.AddShards(player, amount - profile.Shards)
 end
 
 function commands.cash(player, args)

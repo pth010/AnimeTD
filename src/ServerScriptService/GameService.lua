@@ -1,8 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: placed units get their trait, level and evolution bonuses
---  (see TraitData and ProgressData))
+-- (replaces the earlier version: winning a level also pays Trait Shards, see LevelData.WinShards)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -924,6 +923,7 @@ local function playMatch(arena, participants)
 	for p in pairs(arena.Players) do
 		PlayerData.AddGold(p, level.WinGold)
 		PlayerData.AddGems(p, level.WinGems)
+		PlayerData.AddShards(p, level.WinShards or 0)
 		PlayerData.MarkCleared(p, level.Id) -- unlocks the next level
 		statsFor(arena, p).Gems += level.WinGems
 	end
@@ -958,6 +958,7 @@ local function showResults(arena, victory)
 			LevelName = arena.Level.Name,
 			Gold = victory and arena.Level.WinGold or 0,
 			Gems = mine.Gems,
+			Shards = victory and (arena.Level.WinShards or 0) or 0,
 			TotalDamage = math.floor(totalDamage),
 			Players = rows,
 			TeamCount = teamCount,

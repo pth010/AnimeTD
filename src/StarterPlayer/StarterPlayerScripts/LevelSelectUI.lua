@@ -1,6 +1,7 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: LevelSelectUI
+-- (replaces the earlier version: level cards also show the Trait Shards a win pays)
 -- The level-select window that pops up while you stand on a team pad in the lobby.
 --   * The first player on the pad (the host) picks the level; locked levels need the one
 --     before them beaten first. Picking a level starts the countdown, START skips most of it.
@@ -20,6 +21,7 @@ local CARD = Color3.fromRGB(34, 31, 56)
 local SUBTLE = Color3.fromRGB(185, 180, 215)
 local GOLD = Color3.fromRGB(255, 205, 70)
 local GEM = Color3.fromRGB(130, 220, 255)
+local SHARD = Color3.fromRGB(80, 230, 220) -- same as TraitData.ShardColor
 local LOCKED = Color3.fromRGB(110, 105, 130)
 
 local padsFolder = workspace:WaitForChild("Lobby"):WaitForChild("QueuePads")
@@ -171,9 +173,10 @@ for i, level in ipairs(LevelData.Levels) do
 		UDim2.fromOffset(120, 32), UDim2.new(1, -290, 0, 16), 12, SUBTLE)
 	label(card, level.Description, UDim2.fromOffset(22, 52), UDim2.new(1, -170, 0, 18), 12, SUBTLE, Enum.Font.Gotham)
 
-	label(card, "+" .. level.WinGold .. " Gold", UDim2.new(1, -140, 0, 12), UDim2.fromOffset(126, 20), 15, GOLD, Enum.Font.GothamBlack, Enum.TextXAlignment.Right)
-	label(card, "+" .. level.WinGems .. " Gems", UDim2.new(1, -140, 0, 32), UDim2.fromOffset(126, 20), 15, GEM, Enum.Font.GothamBlack, Enum.TextXAlignment.Right)
-	local tag = label(card, "", UDim2.new(1, -170, 0, 54), UDim2.fromOffset(156, 18), 12, SUBTLE, Enum.Font.GothamBlack, Enum.TextXAlignment.Right)
+	label(card, "+" .. level.WinGold .. " Gold", UDim2.new(1, -140, 0, 4), UDim2.fromOffset(126, 18), 14, GOLD, Enum.Font.GothamBlack, Enum.TextXAlignment.Right)
+	label(card, "+" .. level.WinGems .. " Gems", UDim2.new(1, -140, 0, 21), UDim2.fromOffset(126, 18), 14, GEM, Enum.Font.GothamBlack, Enum.TextXAlignment.Right)
+	label(card, "+" .. (level.WinShards or 0) .. " Trait Shards", UDim2.new(1, -140, 0, 38), UDim2.fromOffset(126, 18), 14, SHARD, Enum.Font.GothamBlack, Enum.TextXAlignment.Right)
+	local tag = label(card, "", UDim2.new(1, -170, 0, 58), UDim2.fromOffset(156, 18), 12, SUBTLE, Enum.Font.GothamBlack, Enum.TextXAlignment.Right)
 
 	cards[level.Id] = { Frame = card, Stroke = stroke, Tag = tag, Level = level }
 

@@ -1,17 +1,20 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: CurrencyUI
--- Shows your Gems and Gold on the left side of the screen while in the lobby, and a reward
+-- (replaces the earlier version: adds a Trait Shards row to the counter)
+-- Shows your Gems, Gold and Trait Shards on the left side of the screen while in the lobby, and a reward
 -- popup when you earn something (e.g. "VICTORY! +375 Gold +75 Gems" after winning a match).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
 local rewardEvent = ReplicatedStorage:WaitForChild("RewardEvent")
 local player = Players.LocalPlayer
 
 local GEM_COLOR = Color3.fromRGB(130, 220, 255)
 local GOLD_COLOR = Color3.fromRGB(255, 205, 70)
+local SHARD_COLOR = TraitData.ShardColor
 local PANEL = Color3.fromRGB(25, 25, 40)
 
 local gui = Instance.new("ScreenGui")
@@ -22,8 +25,8 @@ gui.Parent = player:WaitForChild("PlayerGui")
 
 -- ===== Counter (sits just above the Inventory button) =====
 local counter = Instance.new("Frame")
-counter.Position = UDim2.new(0, 10, 0.5, -112)
-counter.Size = UDim2.fromOffset(130, 84)
+counter.Position = UDim2.new(0, 10, 0.5, -146)
+counter.Size = UDim2.fromOffset(130, 118)
 counter.BackgroundColor3 = PANEL
 counter.BackgroundTransparency = 0.1
 counter.Parent = gui
@@ -56,6 +59,7 @@ end
 
 local gemsLabel = counterRow(10, "G", GEM_COLOR)
 local goldLabel = counterRow(44, "$", GOLD_COLOR)
+local shardsLabel = counterRow(78, "T", SHARD_COLOR) -- Trait Shards (spent in the Traits Cave)
 
 -- 1234567 -> "1,234,567"
 local function commas(n)
@@ -68,10 +72,12 @@ end
 local function refreshCounter()
 	gemsLabel.Text = commas(player:GetAttribute("Gems") or 0)
 	goldLabel.Text = commas(player:GetAttribute("Gold") or 0)
+	shardsLabel.Text = commas(player:GetAttribute("Shards") or 0)
 end
 refreshCounter()
 player:GetAttributeChangedSignal("Gems"):Connect(refreshCounter)
 player:GetAttributeChangedSignal("Gold"):Connect(refreshCounter)
+player:GetAttributeChangedSignal("Shards"):Connect(refreshCounter)
 
 local function updateVisibility()
 	counter.Visible = player:GetAttribute("InMatch") ~= true

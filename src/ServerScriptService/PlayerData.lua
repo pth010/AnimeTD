@@ -1,9 +1,10 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: ModuleScript
 -- NAME: PlayerData
--- (replaces the earlier version: traits are summoned onto units in the Traits Cave, see TraitData)
+-- (replaces the earlier version: adds Trait Shards, the currency for trait summons)
 --
--- Single source of truth for each player's gems, gold, pity, units, locks, team and settings.
+-- Single source of truth for each player's gems, gold, trait shards, pity, units, locks,
+-- team and settings.
 -- Saving needs a published place (File > Publish to Roblox). To test in Studio, also enable
 --   Game Settings > Security > "Enable Studio Access to API Services".
 -- If loading fails, the player still plays but that session will NOT save,
@@ -22,6 +23,7 @@ local AUTOSAVE_INTERVAL = 120
 local SAVE_DELAY = 5 -- seconds after a change before it is written
 local STARTING_GEMS = 1000
 local STARTING_GOLD = 0
+local STARTING_SHARDS = 3 -- enough for a few trait summons in the Traits Cave
 
 -- Units every NEW player starts with. Empty = the inventory starts empty.
 -- Example: { ["Blade Novice"] = 1 }
@@ -127,6 +129,7 @@ function PlayerData.Sync(player)
 
 	player:SetAttribute("Gems", profile.Gems)
 	player:SetAttribute("Gold", profile.Gold)
+	player:SetAttribute("Shards", profile.Shards)
 	player:SetAttribute("Pity", profile.Pity)
 
 	local counts, locks = {}, {}
@@ -202,6 +205,7 @@ function PlayerData.Load(player)
 	local profile = {
 		Gems = STARTING_GEMS,
 		Gold = STARTING_GOLD,
+		Shards = STARTING_SHARDS,
 		Pity = 0,
 		Units = cleanCounts(STARTING_UNITS),
 		Obtained = cleanCounts(STARTING_UNITS),
@@ -222,6 +226,7 @@ function PlayerData.Load(player)
 	if ok and type(saved) == "table" then
 		profile.Gems = tonumber(saved.Gems) or STARTING_GEMS
 		profile.Gold = tonumber(saved.Gold) or STARTING_GOLD
+		profile.Shards = tonumber(saved.Shards) or STARTING_SHARDS
 		profile.Pity = tonumber(saved.Pity) or 0
 
 		if type(saved.Units) == "table" then
@@ -360,6 +365,7 @@ function PlayerData.Save(player)
 			return {
 				Gems = profile.Gems,
 				Gold = profile.Gold,
+				Shards = profile.Shards,
 				Pity = profile.Pity,
 				Units = units,
 				Obtained = obtained,
@@ -413,6 +419,14 @@ function PlayerData.AddGold(player, amount)
 	local profile = PlayerData.Profiles[player]
 	if not profile then return end
 	profile.Gold += amount
+	PlayerData.Sync(player)
+	PlayerData.RequestSave(player)
+end
+
+function PlayerData.AddShards(player, amount)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return end
+	profile.Shards = math.max(0, profile.Shards + amount)
 	PlayerData.Sync(player)
 	PlayerData.RequestSave(player)
 end
@@ -519,17 +533,17 @@ function PlayerData.SetAutoEquip(player, on)
 	return true
 end
 
--- Summons a random trait onto a unit in the Traits Cave for TraitData.SummonCost Gold.
+-- Summons a random trait onto a unit in the Traits Cave for TraitData.SummonCost Trait Shards.
 -- It replaces the unit's current trait. Returns ok, errorMessage, newTraitName
 function PlayerData.SummonTrait(player, unitName)
 	local profile = PlayerData.Profiles[player]
 	if not profile then return false, "Still loading." end
 	if not profile.Units[unitName] then return false, "You don't have that unit." end
-	if profile.Gold < TraitData.SummonCost then
-		return false, string.format("You need %d Gold to summon a trait.", TraitData.SummonCost)
+	if profile.Shards < TraitData.SummonCost then
+		return false, "You're out of Trait Shards. Win levels to earn more."
 	end
 
-	profile.Gold -= TraitData.SummonCost
+	profile.Shards -= TraitData.SummonCost
 	local trait = TraitData.Roll()
 	profile.Traits[unitName] = trait
 	PlayerData.Refresh(player) -- the trait can change who auto-equip picks
