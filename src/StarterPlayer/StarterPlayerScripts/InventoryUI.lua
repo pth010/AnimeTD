@@ -1,8 +1,7 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: InventoryUI
--- (replaces the earlier version: traits are summoned in the lobby's Traits Cave now, so the
---  Roll Trait button is gone)
+-- (replaces the earlier version: the Trait Odds button is gone, the odds are in the Traits Cave)
 -- Lobby only. Locked units can't be deleted. Deleting asks for confirmation.
 
 local Players = game:GetService("Players")
@@ -20,7 +19,7 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "InventoryGui"
 gui.ResetOnSpawn = false
 gui.DisplayOrder = 1
--- children always draw on top of their parent (so the Trait Odds and delete windows show
+-- children always draw on top of their parent (so the fuse and delete windows show
 -- their contents above the cards)
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = player:WaitForChild("PlayerGui")
@@ -416,84 +415,6 @@ local function makeCard(name, rarity, count, locked, equipped, autoEquipOn, orde
 		end
 	end)
 end
-
--- ===== Trait odds =====
-local oddsBtn = Instance.new("TextButton")
-oddsBtn.Position = UDim2.fromOffset(320, 64)
-oddsBtn.Size = UDim2.fromOffset(150, 28)
-oddsBtn.Text = "Trait Odds"
-oddsBtn.Font = Enum.Font.GothamBold
-oddsBtn.TextSize = 14
-oddsBtn.TextColor3 = Color3.new(1, 1, 1)
-oddsBtn.BackgroundColor3 = Color3.fromRGB(120, 80, 200)
-oddsBtn.Parent = frame
-Instance.new("UICorner", oddsBtn).CornerRadius = UDim.new(0, 6)
-
-local odds = Instance.new("Frame")
-odds.Size = UDim2.fromScale(1, 1)
-odds.BackgroundColor3 = Color3.fromRGB(20, 18, 34)
-odds.Active = true
-odds.ZIndex = 10
-odds.Visible = false
-odds.Parent = frame
-Instance.new("UICorner", odds).CornerRadius = UDim.new(0, 12)
-
-plainLabel(odds, "Trait Odds", UDim2.fromOffset(0, 8), UDim2.new(1, 0, 0, 30), 22)
-plainLabel(odds, string.format("Summon in the Traits Cave: %d Trait Shard%s each, replaces the unit's current trait.",
-	TraitData.SummonCost, TraitData.SummonCost == 1 and "" or "s"),
-	UDim2.fromOffset(10, 38), UDim2.new(1, -20, 0, 20), 14, Color3.fromRGB(200, 200, 220)).Font = Enum.Font.Gotham
-
-local oddsClose = Instance.new("TextButton")
-oddsClose.Size = UDim2.fromOffset(32, 32)
-oddsClose.Position = UDim2.new(1, -40, 0, 6)
-oddsClose.Text = "X"
-oddsClose.Font = Enum.Font.GothamBold
-oddsClose.TextSize = 16
-oddsClose.TextColor3 = Color3.new(1, 1, 1)
-oddsClose.BackgroundColor3 = Color3.fromRGB(190, 70, 70)
-oddsClose.Parent = odds
-Instance.new("UICorner", oddsClose).CornerRadius = UDim.new(0, 8)
-
-local oddsList = Instance.new("ScrollingFrame")
-oddsList.Position = UDim2.fromOffset(10, 66)
-oddsList.Size = UDim2.new(1, -20, 1, -76)
-oddsList.BackgroundTransparency = 1
-oddsList.BorderSizePixel = 0
-oddsList.ScrollBarThickness = 6
-oddsList.CanvasSize = UDim2.new()
-oddsList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-oddsList.Parent = odds
-local oddsLayout = Instance.new("UIListLayout")
-oddsLayout.Padding = UDim.new(0, 4)
-oddsLayout.SortOrder = Enum.SortOrder.LayoutOrder
-oddsLayout.Parent = oddsList
-
--- rarest tier first
-local row = 0
-for i = #TraitData.Tiers, 1, -1 do
-	local tier = TraitData.Tiers[i]
-	row += 1
-	local header = plainLabel(oddsList, tier.Name, UDim2.new(), UDim2.new(1, -10, 0, 24), 17, tier.Color)
-	header.LayoutOrder = row
-	header.TextXAlignment = Enum.TextXAlignment.Left
-	for _, trait in ipairs(TraitData.Traits) do
-		if trait.Tier == tier.Name then
-			row += 1
-			local r = Instance.new("Frame")
-			r.LayoutOrder = row
-			r.Size = UDim2.new(1, -10, 0, 26)
-			r.BackgroundColor3 = tier.Color:Lerp(Color3.new(0, 0, 0), 0.75)
-			r.Parent = oddsList
-			Instance.new("UICorner", r).CornerRadius = UDim.new(0, 6)
-			addLabel(r, trait.Name, UDim2.fromOffset(8, 0), UDim2.new(0, 120, 1, 0), 14, tier.Color)
-			addLabel(r, TraitData.Describe(trait.Name), UDim2.fromOffset(130, 0), UDim2.new(1, -210, 1, 0), 13, Color3.fromRGB(230, 230, 240))
-			addLabel(r, TraitData.ChanceText(trait.Name), UDim2.new(1, -78, 0, 0), UDim2.new(0, 70, 1, 0), 14, Color3.new(1, 1, 1), Enum.TextXAlignment.Right)
-		end
-	end
-end
-
-oddsBtn.Activated:Connect(function() odds.Visible = true end)
-oddsClose.Activated:Connect(function() odds.Visible = false end)
 
 -- ===== Fuse window =====
 -- Pick a unit's Fuse button, choose which other units to feed it, press FUSE.
