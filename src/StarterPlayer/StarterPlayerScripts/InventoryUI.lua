@@ -1,8 +1,8 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: InventoryUI
--- (replaces the earlier version: adds Fuse (feed other units in for XP / levels) and
---  Evolve (use extra copies of the same unit for stars), see ProgressData)
+-- (replaces the earlier version: traits are enchantments now. Enchant a unit with one from
+--  your bag (summoned in the Traits Cave); the old one goes back in the bag, see TraitData)
 -- Lobby only. Locked units can't be deleted. Deleting asks for confirmation.
 
 local Players = game:GetService("Players")
@@ -20,7 +20,7 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "InventoryGui"
 gui.ResetOnSpawn = false
 gui.DisplayOrder = 1
--- children always draw on top of their parent (so the Trait Odds and delete windows show
+-- children always draw on top of their parent (so the enchantment and delete windows show
 -- their contents above the cards)
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = player:WaitForChild("PlayerGui")
@@ -288,11 +288,10 @@ local function cardButton(parent, text, x, color, y, width)
 	return b
 end
 
--- Clicking Roll on a unit with a Legendary or Mythic trait asks you to click again
-local confirmRoll = nil
 -- Evolve asks you to click again too (it uses up copies and Gold)
 local confirmEvolve = nil
 local openFuse -- opens the fuse window, set further down
+local openEnchant -- opens the enchantment window, set further down
 
 local function makeCard(name, rarity, count, locked, equipped, autoEquipOn, order, traitName, progress)
 	local card = Instance.new("Frame")
@@ -355,12 +354,8 @@ local function makeCard(name, rarity, count, locked, equipped, autoEquipOn, orde
 	local equipBtn = cardButton(card, equipped and "Remove" or "Equip", 114,
 		autoEquipOn and Color3.fromRGB(80, 80, 90) or (equipped and Color3.fromRGB(150, 110, 60) or GREEN))
 
-	local rollBtn = cardButton(card, string.format("Roll Trait (%d Gold)", TraitData.RollCost), 6,
+	local enchantBtn = cardButton(card, trait and "Change Enchantment" or "Enchant", 6,
 		Color3.fromRGB(120, 80, 200), 136, 158)
-	if confirmRoll == name and trait then
-		rollBtn.Text = "Click again to confirm"
-		rollBtn.BackgroundColor3 = Color3.fromRGB(200, 90, 60)
-	end
 
 	local fuseBtn = cardButton(card, level >= ProgressData.MaxLevel and "MAX LV" or "Fuse", 6,
 		level >= ProgressData.MaxLevel and Color3.fromRGB(80, 80, 90) or Color3.fromRGB(50, 140, 200), 164, 77)
@@ -406,20 +401,8 @@ local function makeCard(name, rarity, count, locked, equipped, autoEquipOn, orde
 		end
 	end)
 
-	rollBtn.Activated:Connect(function()
-		-- don't throw away a great trait by accident
-		if trait and (trait.Tier == "Mythic" or trait.Tier == "Legendary") and confirmRoll ~= name then
-			confirmRoll = name
-			rollBtn.Text = "Click again to confirm"
-			rollBtn.BackgroundColor3 = Color3.fromRGB(200, 90, 60)
-			return
-		end
-		confirmRoll = nil
-		local ok, res = call("RollTrait", name)
-		if ok and res.Trait then
-			local got = TraitData.Get(res.Trait)
-			showMessage(string.format("%s rolled %s %s! (%s)", name, got.Tier, got.Name, TraitData.Describe(got.Name)), got.Color)
-		end
+	enchantBtn.Activated:Connect(function()
+		openEnchant(name)
 	end)
 
 	deleteBtn.Activated:Connect(function()
@@ -439,82 +422,182 @@ local function makeCard(name, rarity, count, locked, equipped, autoEquipOn, orde
 	end)
 end
 
--- ===== Trait odds =====
-local oddsBtn = Instance.new("TextButton")
-oddsBtn.Position = UDim2.fromOffset(320, 64)
-oddsBtn.Size = UDim2.fromOffset(150, 28)
-oddsBtn.Text = "Trait Odds"
-oddsBtn.Font = Enum.Font.GothamBold
-oddsBtn.TextSize = 14
-oddsBtn.TextColor3 = Color3.new(1, 1, 1)
-oddsBtn.BackgroundColor3 = Color3.fromRGB(120, 80, 200)
-oddsBtn.Parent = frame
-Instance.new("UICorner", oddsBtn).CornerRadius = UDim.new(0, 6)
+local function smallButton(parent, text, pos, size, color)
+	local b = Instance.new("TextButton")
+	b.Position = pos
+	b.Size = size
+	b.Text = text
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 13
+	b.TextColor3 = Color3.new(1, 1, 1)
+	b.BackgroundColor3 = color
+	b.Parent = parent
+	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+	return b
+end
 
-local odds = Instance.new("Frame")
-odds.Size = UDim2.fromScale(1, 1)
-odds.BackgroundColor3 = Color3.fromRGB(20, 18, 34)
-odds.Active = true
-odds.ZIndex = 10
-odds.Visible = false
-odds.Parent = frame
-Instance.new("UICorner", odds).CornerRadius = UDim.new(0, 12)
+-- ===== Enchantments =====
+-- Opened from a unit's Enchant button (pick one from your bag to put on that unit), or from
+-- the Enchantments button at the top (just look at your bag).
+local bagBtn = Instance.new("TextButton")
+bagBtn.Position = UDim2.fromOffset(320, 64)
+bagBtn.Size = UDim2.fromOffset(150, 28)
+bagBtn.Font = Enum.Font.GothamBold
+bagBtn.TextSize = 14
+bagBtn.TextColor3 = Color3.new(1, 1, 1)
+bagBtn.BackgroundColor3 = Color3.fromRGB(120, 80, 200)
+bagBtn.Parent = frame
+Instance.new("UICorner", bagBtn).CornerRadius = UDim.new(0, 6)
 
-plainLabel(odds, "Trait Odds", UDim2.fromOffset(0, 8), UDim2.new(1, 0, 0, 30), 22)
-plainLabel(odds, string.format("Each roll costs %d Gold and replaces the unit's current trait.", TraitData.RollCost),
-	UDim2.fromOffset(10, 38), UDim2.new(1, -20, 0, 20), 14, Color3.fromRGB(200, 200, 220)).Font = Enum.Font.Gotham
+local enchantTarget = nil -- the unit being enchanted, nil = just looking at the bag
 
-local oddsClose = Instance.new("TextButton")
-oddsClose.Size = UDim2.fromOffset(32, 32)
-oddsClose.Position = UDim2.new(1, -40, 0, 6)
-oddsClose.Text = "X"
-oddsClose.Font = Enum.Font.GothamBold
-oddsClose.TextSize = 16
-oddsClose.TextColor3 = Color3.new(1, 1, 1)
-oddsClose.BackgroundColor3 = Color3.fromRGB(190, 70, 70)
-oddsClose.Parent = odds
-Instance.new("UICorner", oddsClose).CornerRadius = UDim.new(0, 8)
+local enchantWin = Instance.new("Frame")
+enchantWin.Size = UDim2.fromScale(1, 1)
+enchantWin.BackgroundColor3 = Color3.fromRGB(20, 18, 34)
+enchantWin.Active = true
+enchantWin.ZIndex = 10
+enchantWin.Visible = false
+enchantWin.Parent = frame
+Instance.new("UICorner", enchantWin).CornerRadius = UDim.new(0, 12)
 
-local oddsList = Instance.new("ScrollingFrame")
-oddsList.Position = UDim2.fromOffset(10, 66)
-oddsList.Size = UDim2.new(1, -20, 1, -76)
-oddsList.BackgroundTransparency = 1
-oddsList.BorderSizePixel = 0
-oddsList.ScrollBarThickness = 6
-oddsList.CanvasSize = UDim2.new()
-oddsList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-oddsList.Parent = odds
-local oddsLayout = Instance.new("UIListLayout")
-oddsLayout.Padding = UDim.new(0, 4)
-oddsLayout.SortOrder = Enum.SortOrder.LayoutOrder
-oddsLayout.Parent = oddsList
+local enchantTitle = plainLabel(enchantWin, "", UDim2.fromOffset(0, 8), UDim2.new(1, 0, 0, 30), 22)
+local enchantInfo = plainLabel(enchantWin, "", UDim2.fromOffset(10, 38), UDim2.new(1, -150, 0, 20), 14, Color3.fromRGB(200, 200, 220))
+enchantInfo.TextXAlignment = Enum.TextXAlignment.Left
+plainLabel(enchantWin, "Summon more in the Traits Cave. Swapping or removing puts the old one back in your bag.",
+	UDim2.fromOffset(10, 60), UDim2.new(1, -20, 0, 18), 12, Color3.fromRGB(160, 160, 185)).Font = Enum.Font.Gotham
 
--- rarest tier first
-local row = 0
-for i = #TraitData.Tiers, 1, -1 do
-	local tier = TraitData.Tiers[i]
-	row += 1
-	local header = plainLabel(oddsList, tier.Name, UDim2.new(), UDim2.new(1, -10, 0, 24), 17, tier.Color)
-	header.LayoutOrder = row
-	header.TextXAlignment = Enum.TextXAlignment.Left
-	for _, trait in ipairs(TraitData.Traits) do
-		if trait.Tier == tier.Name then
-			row += 1
-			local r = Instance.new("Frame")
-			r.LayoutOrder = row
-			r.Size = UDim2.new(1, -10, 0, 26)
-			r.BackgroundColor3 = tier.Color:Lerp(Color3.new(0, 0, 0), 0.75)
-			r.Parent = oddsList
-			Instance.new("UICorner", r).CornerRadius = UDim.new(0, 6)
-			addLabel(r, trait.Name, UDim2.fromOffset(8, 0), UDim2.new(0, 120, 1, 0), 14, tier.Color)
-			addLabel(r, TraitData.Describe(trait.Name), UDim2.fromOffset(130, 0), UDim2.new(1, -210, 1, 0), 13, Color3.fromRGB(230, 230, 240))
-			addLabel(r, TraitData.ChanceText(trait.Name), UDim2.new(1, -78, 0, 0), UDim2.new(0, 70, 1, 0), 14, Color3.new(1, 1, 1), Enum.TextXAlignment.Right)
+local enchantClose = Instance.new("TextButton")
+enchantClose.Size = UDim2.fromOffset(32, 32)
+enchantClose.Position = UDim2.new(1, -40, 0, 6)
+enchantClose.Text = "X"
+enchantClose.Font = Enum.Font.GothamBold
+enchantClose.TextSize = 16
+enchantClose.TextColor3 = Color3.new(1, 1, 1)
+enchantClose.BackgroundColor3 = Color3.fromRGB(190, 70, 70)
+enchantClose.Parent = enchantWin
+Instance.new("UICorner", enchantClose).CornerRadius = UDim.new(0, 8)
+
+local removeBtn = Instance.new("TextButton")
+removeBtn.Size = UDim2.fromOffset(130, 26)
+removeBtn.Position = UDim2.new(1, -140, 0, 36)
+removeBtn.Text = "Remove"
+removeBtn.Font = Enum.Font.GothamBold
+removeBtn.TextSize = 13
+removeBtn.TextColor3 = Color3.new(1, 1, 1)
+removeBtn.BackgroundColor3 = Color3.fromRGB(150, 70, 70)
+removeBtn.Parent = enchantWin
+Instance.new("UICorner", removeBtn).CornerRadius = UDim.new(0, 6)
+
+local enchantList = Instance.new("ScrollingFrame")
+enchantList.Position = UDim2.fromOffset(10, 84)
+enchantList.Size = UDim2.new(1, -20, 1, -124)
+enchantList.BackgroundTransparency = 1
+enchantList.BorderSizePixel = 0
+enchantList.ScrollBarThickness = 6
+enchantList.CanvasSize = UDim2.new()
+enchantList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+enchantList.Parent = enchantWin
+local enchantLayout = Instance.new("UIListLayout")
+enchantLayout.Padding = UDim.new(0, 4)
+enchantLayout.SortOrder = Enum.SortOrder.LayoutOrder
+enchantLayout.Parent = enchantList
+
+local function refreshBagButton()
+	local total = 0
+	for _, n in pairs(TraitData.ParseBag(player:GetAttribute("Enchants"))) do
+		total += n
+	end
+	bagBtn.Text = string.format("Enchantments (%d)", total)
+end
+
+local function refreshEnchant()
+	local bag = TraitData.ParseBag(player:GetAttribute("Enchants"))
+	local current = nil
+	if enchantTarget then
+		if not parseCounts()[enchantTarget] then -- the unit is gone
+			enchantTarget = nil
+		else
+			current = TraitData.Get(TraitData.Parse(player:GetAttribute("UnitTraits"))[enchantTarget])
 		end
+	end
+
+	if enchantTarget then
+		enchantTitle.Text = "Enchant " .. enchantTarget
+		enchantInfo.Text = current and string.format("Now: %s %s (%s)", current.Tier, current.Name, TraitData.Describe(current.Name))
+			or "Now: no enchantment"
+		enchantInfo.TextColor3 = current and current.Color or Color3.fromRGB(200, 200, 220)
+	else
+		enchantTitle.Text = "Your Enchantments"
+		enchantInfo.Text = "Press Enchant on a unit to put one on it."
+		enchantInfo.TextColor3 = Color3.fromRGB(200, 200, 220)
+	end
+	removeBtn.Visible = current ~= nil
+
+	for _, c in ipairs(enchantList:GetChildren()) do
+		if c:IsA("Frame") then c:Destroy() end
+	end
+
+	local row = 0
+	for i = #TraitData.Tiers, 1, -1 do -- rarest tier first
+		local tier = TraitData.Tiers[i]
+		for _, trait in ipairs(TraitData.Traits) do
+			local have = bag[trait.Name]
+			if trait.Tier == tier.Name and have then
+				row += 1
+				local r = Instance.new("Frame")
+				r.LayoutOrder = row
+				r.Size = UDim2.new(1, -10, 0, 30)
+				r.BackgroundColor3 = tier.Color:Lerp(Color3.new(0, 0, 0), 0.75)
+				r.Parent = enchantList
+				Instance.new("UICorner", r).CornerRadius = UDim.new(0, 6)
+				addLabel(r, trait.Name, UDim2.fromOffset(8, 0), UDim2.new(0, 110, 1, 0), 14, tier.Color)
+				addLabel(r, TraitData.Describe(trait.Name), UDim2.fromOffset(120, 0), UDim2.new(1, -260, 1, 0), 12, Color3.fromRGB(230, 230, 240))
+				addLabel(r, "x" .. have, UDim2.new(1, -136, 0, 0), UDim2.new(0, 40, 1, 0), 14, Color3.new(1, 1, 1), Enum.TextXAlignment.Right)
+				if enchantTarget then
+					local use = smallButton(r, current and "Swap" or "Enchant", UDim2.new(1, -88, 0, 3), UDim2.fromOffset(80, 24), Color3.fromRGB(120, 80, 200))
+					use.Activated:Connect(function()
+						local unitName = enchantTarget
+						if unitName and call("Enchant", unitName, trait.Name) then
+							showMessage(string.format("%s is now enchanted with %s %s! (%s)", unitName, trait.Tier, trait.Name,
+								TraitData.Describe(trait.Name)), trait.Color)
+							enchantWin.Visible = false
+							enchantTarget = nil
+						end
+					end)
+				end
+			end
+		end
+	end
+	if row == 0 then
+		local holder = Instance.new("Frame")
+		holder.Size = UDim2.new(1, -10, 0, 60)
+		holder.BackgroundTransparency = 1
+		holder.Parent = enchantList
+		plainLabel(holder, "Your bag is empty.\nWalk into the Traits Cave in the lobby to summon enchantments!",
+			UDim2.new(), UDim2.fromScale(1, 1), 15, Color3.fromRGB(170, 170, 190))
 	end
 end
 
-oddsBtn.Activated:Connect(function() odds.Visible = true end)
-oddsClose.Activated:Connect(function() odds.Visible = false end)
+removeBtn.Activated:Connect(function()
+	local unitName = enchantTarget
+	if unitName and call("Unenchant", unitName) then
+		showMessage(unitName .. "'s enchantment went back in your bag.", Color3.fromRGB(200, 200, 220))
+	end
+end)
+enchantClose.Activated:Connect(function()
+	enchantWin.Visible = false
+	enchantTarget = nil
+end)
+bagBtn.Activated:Connect(function()
+	openEnchant(nil)
+end)
+
+openEnchant = function(name)
+	confirmEvolve = nil
+	enchantTarget = name
+	enchantWin.Visible = true
+	refreshEnchant()
+end
 
 -- ===== Fuse window =====
 -- Pick a unit's Fuse button, choose which other units to feed it, press FUSE.
@@ -532,20 +615,6 @@ Instance.new("UICorner", fuseWin).CornerRadius = UDim.new(0, 12)
 
 local fuseTitle = plainLabel(fuseWin, "", UDim2.fromOffset(0, 8), UDim2.new(1, 0, 0, 30), 22)
 local fuseInfo = plainLabel(fuseWin, "", UDim2.fromOffset(10, 38), UDim2.new(1, -20, 0, 20), 15, Color3.fromRGB(110, 200, 255))
-
-local function smallButton(parent, text, pos, size, color)
-	local b = Instance.new("TextButton")
-	b.Position = pos
-	b.Size = size
-	b.Text = text
-	b.Font = Enum.Font.GothamBold
-	b.TextSize = 13
-	b.TextColor3 = Color3.new(1, 1, 1)
-	b.BackgroundColor3 = color
-	b.Parent = parent
-	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
-	return b
-end
 
 local fuseClose = smallButton(fuseWin, "X", UDim2.new(1, -40, 0, 6), UDim2.fromOffset(32, 32), Color3.fromRGB(190, 70, 70))
 fuseClose.TextSize = 16
@@ -718,7 +787,7 @@ fuseGo.Activated:Connect(function()
 end)
 
 openFuse = function(name)
-	confirmRoll, confirmEvolve = nil, nil
+	confirmEvolve = nil
 	fuseTarget = name
 	table.clear(fuseSelection)
 	fuseWin.Visible = true
@@ -728,7 +797,9 @@ end
 local function rebuild()
 	closeDialog() -- the unit under the dialog may have changed
 	refreshSettings()
+	refreshBagButton()
 	if fuseWin.Visible then refreshFuse() end
+	if enchantWin.Visible then refreshEnchant() end
 	for _, c in ipairs(scroll:GetChildren()) do
 		if c:IsA("Frame") then c:Destroy() end
 	end
@@ -776,7 +847,7 @@ local function scheduleRebuild()
 end
 
 rebuild()
-for _, attribute in ipairs({ "UnitCounts", "UnitLocks", "Equipped", "AutoEquip", "AutoDelete", "UnitTraits", "UnitProgress" }) do
+for _, attribute in ipairs({ "UnitCounts", "UnitLocks", "Equipped", "AutoEquip", "AutoDelete", "UnitTraits", "UnitProgress", "Enchants" }) do
 	player:GetAttributeChangedSignal(attribute):Connect(scheduleRebuild)
 end
 

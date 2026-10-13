@@ -1,10 +1,13 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: TraitData
--- Unit traits. Every unit you own can carry one trait, which boosts that unit everywhere
--- it is placed. Roll (and re-roll) a trait in the Inventory for Gold.
+-- (replaces the earlier version: traits are now enchantments you summon in the Traits Cave)
+-- Unit traits, used as enchantments. Summon them for Gold in the lobby's Traits Cave; each
+-- one goes into your enchantment bag. In the Inventory, Enchant a unit with one from the bag
+-- (it boosts that unit everywhere it is placed). Swapping or removing an enchantment puts
+-- the old one back in the bag, so nothing you summon is ever lost.
 --
--- Each trait's Chance is the % chance to land it on one roll (all chances add up to 100).
+-- Each trait's Chance is the % chance to land it on one summon (all chances add up to 100).
 -- The bonuses are multipliers on the unit's stats:
 --   Damage   = 0.10   +10% damage
 --   Speed    = 0.10   attacks 10% faster (the cooldown is divided by 1.10)
@@ -17,7 +20,8 @@ local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 
 local TraitData = {}
 
-TraitData.RollCost = 300 -- Gold for one roll
+TraitData.SummonCost = 300     -- Gold for one summon in the Traits Cave
+TraitData.TenSummonCost = 2700 -- Gold for ten (10% off)
 
 TraitData.Tiers = {
 	{ Name = "Common",    Color = Color3.fromRGB(190, 190, 190) },
@@ -149,6 +153,17 @@ function TraitData.Parse(text)
 		traits[unitName] = traitName
 	end
 	return traits
+end
+
+-- Reads the "Enchants" player attribute (your bag: "Lord=1;Swift=3") into [traitName] = count
+function TraitData.ParseBag(text)
+	local bag = {}
+	for traitName, n in string.gmatch(text or "", "([^;=]+)=(%d+)") do
+		if TraitData.ByName[traitName] then
+			bag[traitName] = tonumber(n)
+		end
+	end
+	return bag
 end
 
 return TraitData

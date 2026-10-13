@@ -1,7 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: InventoryService
--- (replaces the earlier version: adds fusing units for XP and evolving with extra copies)
+-- (replaces the earlier version: traits are enchantments now, summoned in the Traits Cave)
 -- Handles every button in the inventory. The server checks everything,
 -- so a locked unit can never be deleted by a hacked client.
 
@@ -19,7 +19,9 @@ remote.Parent = ReplicatedStorage
 --   "Equip",      unitName,   true/false   (only while auto-equip is off)
 --   "AutoEquip",  "",         true/false
 --   "AutoDelete", rarityName, true/false
---   "RollTrait",  unitName                 (costs Gold, see TraitData.RollCost)
+--   "SummonEnchant", "",       1 or 10      (Traits Cave, costs Gold, see TraitData.SummonCost)
+--   "Enchant",    unitName,   traitName    (from your bag; the old one goes back in the bag)
+--   "Unenchant",  unitName                 (puts the unit's enchantment back in the bag)
 --   "Fuse",       targetName, { [unitName] = copies }   (feeds other units in for XP)
 --   "Evolve",     unitName                 (uses extra copies + Gold, see ProgressData)
 remote.OnServerInvoke = function(player, action, name, arg)
@@ -30,7 +32,7 @@ remote.OnServerInvoke = function(player, action, name, arg)
 		return { Success = false, Error = "Not during a match." }
 	end
 
-	local ok, err, trait, xp
+	local ok, err, results, xp
 	if action == "Lock" then
 		ok, err = PlayerData.SetLocked(player, name, arg == true)
 	elseif action == "Delete" then
@@ -41,8 +43,15 @@ remote.OnServerInvoke = function(player, action, name, arg)
 		ok, err = PlayerData.SetAutoEquip(player, arg == true)
 	elseif action == "AutoDelete" then
 		ok, err = PlayerData.SetAutoDelete(player, name, arg == true)
-	elseif action == "RollTrait" then
-		ok, err, trait = PlayerData.RollTrait(player, name)
+	elseif action == "SummonEnchant" then
+		ok, err, results = PlayerData.SummonEnchants(player, arg)
+	elseif action == "Enchant" then
+		if typeof(arg) ~= "string" then
+			return { Success = false, Error = "Pick an enchantment." }
+		end
+		ok, err = PlayerData.Enchant(player, name, arg)
+	elseif action == "Unenchant" then
+		ok, err = PlayerData.Enchant(player, name, nil)
 	elseif action == "Fuse" then
 		ok, err, xp = PlayerData.Fuse(player, name, arg)
 	elseif action == "Evolve" then
@@ -51,5 +60,5 @@ remote.OnServerInvoke = function(player, action, name, arg)
 		return { Success = false, Error = "Unknown action." }
 	end
 
-	return { Success = ok == true, Error = err, Trait = trait, XP = xp }
+	return { Success = ok == true, Error = err, Results = results, XP = xp }
 end

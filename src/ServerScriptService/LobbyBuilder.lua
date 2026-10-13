@@ -1,18 +1,18 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: LobbyBuilder
--- (replaces the earlier version: the summon altar is now a Wishing Fountain with a floating
---  summon crystal, water jets, wishing coins and lanterns)
+-- (replaces the earlier version: adds the Traits Cave, where you summon trait enchantments)
 -- Builds the lobby room at runtime:
 --   * a 240 x 240 stud square room, 40 studs tall, with walls, roof and ceiling lights
 --   * the player spawn near the front wall
 --   * the Wishing Fountain (walk up to it and the summon window pops up) with its own sign
+--   * the Traits Cave across from it (walk inside and the enchantment summon window pops up)
 --   * FIVE team queue pads along the back wall, each with a standing sign board that
 --     shows the team name and the live queue status
 -- Assumes the default 512x512 Baseplate (the room is centered on the origin).
 -- If Workspace.Lobby already exists (you built your own), this script does nothing.
 -- A custom lobby needs: Lobby.LobbySpawn, Lobby.SummonAltar (a flat part marking the summon
--- area), and Lobby.QueuePads
+-- area), Lobby.TraitCave (a flat part marking the enchantment summon area), and Lobby.QueuePads
 -- containing Pad1..Pad5 (the parts to stand on) and Sign1..Sign5 (parts holding a
 -- SurfaceGui named QueueGui with a TextLabel named Label inside).
 
@@ -359,6 +359,142 @@ end)
 local toSpawn = Vector3.new(spawn.Position.X - altarPos.X, 0, spawn.Position.Z - altarPos.Z).Unit
 local signPos = altarPos - toSpawn * 19
 makeSignBoard(lobby, "SummonSign", signPos, MAGIC, "SUMMON", "Walk up to the Wishing Fountain to get new units!", toSpawn, 13)
+
+-- ===== Traits Cave (the enchantment summon spot, front-right area) =====
+-- A rocky cave whose entrance faces the walkway. Walk inside and the enchantment window
+-- pops up (TraitCaveUI checks the invisible TraitCave trigger covering the cave floor).
+local cavePos = CENTER + Vector3.new(85, 0, 55)
+local cave = Instance.new("Folder")
+cave.Name = "TraitsCave"
+cave.Parent = lobby
+
+local CAVE_ROCK = Color3.fromRGB(78, 72, 92)
+local CAVE_ROCK_DARK = Color3.fromRGB(52, 48, 64)
+local CAVE_CRYSTALS = {
+	Color3.fromRGB(80, 230, 220),
+	Color3.fromRGB(170, 100, 255),
+	Color3.fromRGB(255, 90, 170),
+}
+local CAVE_INNER = 15   -- the inside is 30 x 30 studs
+local CAVE_HEIGHT = 18
+local WALL = 3
+
+local function rock(name, size, cframe, color)
+	local r = makePart(cave, name, size, cframe.Position, color or CAVE_ROCK, Enum.Material.Rock)
+	r.CFrame = cframe
+	return r
+end
+
+-- A glowing crystal standing at `base`, leaning by `tilt` (radians around X then Z)
+local function crystal(base, height, width, color, tiltX, tiltZ, lightRange)
+	local c = makePart(cave, "Crystal", Vector3.new(width, height, width), base, color, Enum.Material.Neon)
+	c.CanCollide = false
+	c.CFrame = CFrame.new(base) * CFrame.Angles(tiltX or 0, math.rad(45), tiltZ or 0) * CFrame.new(0, height / 2, 0)
+	if lightRange then
+		local light = Instance.new("PointLight")
+		light.Color = color
+		light.Range = lightRange
+		light.Brightness = 1.6
+		light.Parent = c
+	end
+	return c
+end
+
+-- Walls and roof. The entrance is a 12 x 11 gap in the front (-X) wall.
+local wallY = CAVE_HEIGHT / 2
+local edge = CAVE_INNER + WALL / 2
+local span = CAVE_INNER * 2 + WALL * 2
+rock("BackWall", Vector3.new(WALL, CAVE_HEIGHT, span), CFrame.new(cavePos + Vector3.new(edge, wallY, 0)))
+rock("SideWall", Vector3.new(span, CAVE_HEIGHT, WALL), CFrame.new(cavePos + Vector3.new(0, wallY, edge)))
+rock("SideWall", Vector3.new(span, CAVE_HEIGHT, WALL), CFrame.new(cavePos + Vector3.new(0, wallY, -edge)))
+local doorHalf, doorHeight = 6, 11
+local frontLen = edge + WALL / 2 - doorHalf
+for _, sz in ipairs({ -1, 1 }) do
+	rock("FrontWall", Vector3.new(WALL, CAVE_HEIGHT, frontLen),
+		CFrame.new(cavePos + Vector3.new(-edge, wallY, sz * (doorHalf + frontLen / 2))))
+end
+rock("Lintel", Vector3.new(WALL, CAVE_HEIGHT - doorHeight, doorHalf * 2),
+	CFrame.new(cavePos + Vector3.new(-edge, doorHeight + (CAVE_HEIGHT - doorHeight) / 2, 0)))
+rock("Roof", Vector3.new(span, WALL, span), CFrame.new(cavePos + Vector3.new(0, CAVE_HEIGHT + WALL / 2, 0)), CAVE_ROCK_DARK)
+makePart(cave, "CaveFloor", Vector3.new(CAVE_INNER * 2, 0.1, CAVE_INNER * 2), cavePos + Vector3.new(0, 0.45, 0),
+	Color3.fromRGB(40, 36, 52), Enum.Material.Slate)
+
+-- Boulders piled against the outside and on the roof, so it reads as a cave and not a box.
+-- Each one sits far enough out that it can never poke into the inside or the doorway.
+local boulderRng = Random.new(7)
+local function boulder(offset, size)
+	local b = rock("Boulder", Vector3.new(size, size * 0.8, size),
+		CFrame.new(cavePos + offset) * CFrame.Angles(boulderRng:NextNumber() * 0.6, boulderRng:NextNumber() * math.pi, boulderRng:NextNumber() * 0.6),
+		boulderRng:NextNumber() < 0.5 and CAVE_ROCK or CAVE_ROCK_DARK)
+	return b
+end
+for i = 1, 6 do -- along the back and both sides
+	local t = (i - 0.5) / 6 * 2 - 1 -- -1..1 along the wall
+	local size = boulderRng:NextNumber(6, 9)
+	local out = CAVE_INNER + size * 0.87
+	boulder(Vector3.new(out, size * 0.3, t * CAVE_INNER), size)
+	boulder(Vector3.new(t * CAVE_INNER, size * 0.3, out), size)
+	boulder(Vector3.new(t * CAVE_INNER, size * 0.3, -out), size)
+end
+for _, p in ipairs({ { -10, -9 }, { -2, 8 }, { 7, -4 }, { 11, 10 }, { -11, 9 }, { 3, -12 } }) do -- on the roof
+	local size = boulderRng:NextNumber(7, 11)
+	boulder(Vector3.new(p[1], CAVE_HEIGHT + WALL + size * 0.25, p[2]), size)
+end
+
+-- Crystals: a big cluster in the middle, smaller ones along the walls, and two by the door
+local clusterPos = cavePos + Vector3.new(3, 0.5, 0)
+rock("Pedestal", Vector3.new(7, 2, 7), CFrame.new(clusterPos + Vector3.new(0, 1, 0)) * CFrame.Angles(0, math.rad(20), 0), CAVE_ROCK_DARK)
+for i = 1, 6 do
+	local a = i / 6 * math.pi * 2
+	crystal(clusterPos + Vector3.new(math.cos(a) * 2, 2, math.sin(a) * 2), 3 + (i % 3), 1.1,
+		CAVE_CRYSTALS[i % 3 + 1], math.sin(a) * 0.45, -math.cos(a) * 0.45)
+end
+for i, p in ipairs({ { 12, -12 }, { 12, 12 }, { 0, -13 }, { 0, 13 }, { -12, -12 }, { -12, 12 }, { 13, 0 } }) do
+	local color = CAVE_CRYSTALS[i % 3 + 1]
+	crystal(cavePos + Vector3.new(p[1], 0.5, p[2]), 2.5, 0.9, color, -p[2] / 60, p[1] / 60, i % 2 == 1 and 20 or nil)
+	crystal(cavePos + Vector3.new(p[1] - math.sign(p[1]) * 1.2, 0.5, p[2] + 0.8), 1.6, 0.7, color, -p[2] / 40, p[1] / 40)
+end
+for _, sz in ipairs({ -1, 1 }) do
+	crystal(cavePos + Vector3.new(-edge - 3, 0.5, sz * (doorHalf + 2)), 4, 1.2, CAVE_CRYSTALS[2], 0, sz * 0.2, 18)
+end
+
+-- The floating trait crystal over the cluster
+local traitCrystal = makePart(cave, "TraitCrystal", Vector3.new(2.2, 3.2, 2.2), clusterPos + Vector3.new(0, 9, 0), CAVE_CRYSTALS[1], Enum.Material.Neon)
+traitCrystal.CanCollide = false
+local traitLight = Instance.new("PointLight")
+traitLight.Color = CAVE_CRYSTALS[1]
+traitLight.Range = 30
+traitLight.Brightness = 2
+traitLight.Parent = traitCrystal
+local traitSparkles = Instance.new("ParticleEmitter")
+traitSparkles.Color = ColorSequence.new(CAVE_CRYSTALS[1], CAVE_CRYSTALS[2])
+traitSparkles.LightEmission = 1
+traitSparkles.Size = NumberSequence.new(0.35, 0)
+traitSparkles.Lifetime = NumberRange.new(1, 2)
+traitSparkles.Speed = NumberRange.new(1, 3)
+traitSparkles.SpreadAngle = Vector2.new(180, 180)
+traitSparkles.Rate = 14
+traitSparkles.Parent = traitCrystal
+
+-- The invisible trigger: standing anywhere inside the cave opens the enchantment window
+local caveTrigger = makePart(lobby, "TraitCave", Vector3.new(CAVE_INNER * 2, 1, CAVE_INNER * 2), cavePos + Vector3.new(0, 0.9, 0), CAVE_CRYSTALS[1])
+caveTrigger.Transparency = 1
+caveTrigger.CanCollide = false
+caveTrigger.CanQuery = false
+caveTrigger.CanTouch = false
+
+local caveTime = 0
+game:GetService("RunService").Heartbeat:Connect(function(dt)
+	caveTime += dt
+	traitCrystal.CFrame = CFrame.new(clusterPos + Vector3.new(0, 9 + math.sin(caveTime * 1.2) * 0.5, 0))
+		* CFrame.Angles(0, -caveTime * 0.9, 0) * CFrame.Angles(math.rad(45), 0, math.rad(45))
+end)
+
+-- The sign stands beside the entrance and faces the spawn
+local caveSignPos = cavePos + Vector3.new(-26, 0, 26)
+local caveToSpawn = Vector3.new(spawn.Position.X - caveSignPos.X, 0, spawn.Position.Z - caveSignPos.Z).Unit
+makeSignBoard(lobby, "TraitCaveSign", caveSignPos, CAVE_CRYSTALS[1], "TRAITS CAVE",
+	"Walk inside to summon trait enchantments for your units!", caveToSpawn, 13)
 
 -- ===== Five team queue pads (back wall) =====
 for i = 1, NUM_PADS do

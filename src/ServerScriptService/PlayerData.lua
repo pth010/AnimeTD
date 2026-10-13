@@ -1,7 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: ModuleScript
 -- NAME: PlayerData
--- (replaces the earlier version: adds unit levels from fusing, and evolution stars)
+-- (replaces the earlier version: traits are now enchantments, summoned in the Traits Cave
+--  into a bag and put on / taken off units, see TraitData)
 --
 -- Single source of truth for each player's gems, gold, pity, units, locks, team and settings.
 -- Saving needs a published place (File > Publish to Roblox). To test in Studio, also enable
@@ -49,7 +50,8 @@ PlayerData.Profiles = {}
 --   AutoEquip  = true: the team is always your best units by damage per second
 --   AutoDelete [rarityName] = true: newly summoned units of that rarity are deleted on arrival
 --   Cleared    [levelId] = true: levels this player has beaten (see LevelData)
---   Traits     [name] = trait name (see TraitData), one per unit you own
+--   Traits     [name] = trait name (see TraitData), the enchantment on a unit you own
+--   Enchants   [traitName] = copies of that enchantment in your bag (not on any unit)
 --   XP         [name] = fusion XP (sets the unit's level, see ProgressData)
 --   Stars      [name] = evolution stars (0 to ProgressData.MaxStars)
 -- Units = Obtained - Deleted. Keeping both running totals lets two servers merge
@@ -167,6 +169,13 @@ function PlayerData.Sync(player)
 	table.sort(traits)
 	player:SetAttribute("UnitTraits", table.concat(traits, ";"))        -- "Blade Novice=Lord;Frost Mage=Swift"
 
+	local bag = {}
+	for traitName, n in pairs(profile.Enchants) do
+		table.insert(bag, traitName .. "=" .. n)
+	end
+	table.sort(bag)
+	player:SetAttribute("Enchants", table.concat(bag, ";"))             -- "Lord=1;Swift=3"
+
 	local progress = {}
 	for name in pairs(profile.Units) do
 		local xp, stars = profile.XP[name] or 0, profile.Stars[name] or 0
@@ -212,6 +221,7 @@ function PlayerData.Load(player)
 		AutoDelete = {},
 		Cleared = {},
 		Traits = {},
+		Enchants = {},
 		XP = {},
 		Stars = {},
 		Busy = false,
@@ -270,6 +280,14 @@ function PlayerData.Load(player)
 				end
 			end
 		end
+		if type(saved.Enchants) == "table" then
+			for traitName, n in pairs(saved.Enchants) do
+				n = tonumber(n)
+				if TraitData.Get(traitName) and n and n >= 1 then
+					profile.Enchants[traitName] = math.floor(n)
+				end
+			end
+		end
 		if type(saved.XP) == "table" then
 			for name, xp in pairs(saved.XP) do
 				if profile.Units[name] and tonumber(xp) then
@@ -322,10 +340,13 @@ function PlayerData.Save(player)
 					if profile.Locked[name] then
 						locked[name] = true
 					end
-					-- keep this server's trait, or the one another server saved
-					traits[name] = profile.Traits[name]
-						or (type(old) == "table" and type(old.Traits) == "table" and TraitData.Get(old.Traits[name]) and old.Traits[name])
-						or nil
+					-- this server's enchantment (nil = taken off here), or for a unit this server
+					-- never had, the one another server saved
+					if profile.Units[name] then
+						traits[name] = profile.Traits[name]
+					elseif type(old) == "table" and type(old.Traits) == "table" and TraitData.Get(old.Traits[name]) then
+						traits[name] = old.Traits[name]
+					end
 					xpOut[name] = profile.XP[name] or tonumber(oldXP[name])
 					starsOut[name] = profile.Stars[name] or tonumber(oldStars[name])
 				end
@@ -367,6 +388,7 @@ function PlayerData.Save(player)
 				AutoDelete = table.clone(profile.AutoDelete),
 				Cleared = clearedList,
 				Traits = traits,
+				Enchants = table.clone(profile.Enchants),
 				XP = xpOut,
 				Stars = starsOut,
 			}
@@ -444,6 +466,22 @@ function PlayerData.AddUnit(profile, unitName)
 	return false
 end
 
+-- Puts one enchantment into the bag
+local function addEnchant(profile, traitName)
+	profile.Enchants[traitName] = (profile.Enchants[traitName] or 0) + 1
+end
+
+-- The last copy of a unit is gone: its level and stars go with it, but its enchantment
+-- goes back into the bag
+local function forgetUnit(profile, unitName)
+	if profile.Traits[unitName] then
+		addEnchant(profile, profile.Traits[unitName])
+	end
+	profile.Traits[unitName] = nil
+	profile.XP[unitName] = nil
+	profile.Stars[unitName] = nil
+end
+
 -- amount: a number of copies, or "All". Returns ok, errorMessage
 function PlayerData.DeleteUnit(player, unitName, amount)
 	local profile = PlayerData.Profiles[player]
@@ -461,10 +499,7 @@ function PlayerData.DeleteUnit(player, unitName, amount)
 	profile.Deleted[unitName] = (profile.Deleted[unitName] or 0) + n
 	profile.Units[unitName] = (have - n > 0) and (have - n) or nil
 	if not profile.Units[unitName] then
-		-- the last copy is gone, and its trait, level and stars with it
-		profile.Traits[unitName] = nil
-		profile.XP[unitName] = nil
-		profile.Stars[unitName] = nil
+		forgetUnit(profile, unitName)
 	end
 
 	PlayerData.Refresh(player)
@@ -512,21 +547,63 @@ function PlayerData.SetAutoEquip(player, on)
 	return true
 end
 
--- Rolls a new random trait onto a unit for TraitData.RollCost Gold.
--- Returns ok, errorMessage, newTraitName
-function PlayerData.RollTrait(player, unitName)
+-- Summons 1 or 10 enchantments in the Traits Cave (costs Gold) into the bag.
+-- Returns ok, errorMessage, { traitName, ... }
+function PlayerData.SummonEnchants(player, count)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	if count ~= 1 and count ~= 10 then return false, "Invalid summon." end
+	local cost = count == 10 and TraitData.TenSummonCost or TraitData.SummonCost
+	if profile.Gold < cost then
+		return false, string.format("You need %d Gold.", cost)
+	end
+
+	profile.Gold -= cost
+	local results = {}
+	for i = 1, count do
+		local traitName = TraitData.Roll()
+		addEnchant(profile, traitName)
+		results[i] = traitName
+	end
+	PlayerData.Sync(player)
+	PlayerData.RequestSave(player)
+	return true, nil, results
+end
+
+-- Enchants a unit with a trait from the bag. The unit's old enchantment goes back in the bag.
+-- traitName nil = just take the current enchantment off. Returns ok, errorMessage
+function PlayerData.Enchant(player, unitName, traitName)
 	local profile = PlayerData.Profiles[player]
 	if not profile then return false, "Still loading." end
 	if not profile.Units[unitName] then return false, "You don't have that unit." end
-	if profile.Gold < TraitData.RollCost then
-		return false, string.format("You need %d Gold to roll a trait.", TraitData.RollCost)
+	local current = profile.Traits[unitName]
+	if traitName == nil then
+		if not current then return false, unitName .. " has no enchantment." end
+	else
+		if not TraitData.Get(traitName) then return false, "Unknown enchantment." end
+		if traitName == current then return false, unitName .. " already has " .. traitName .. "." end
+		local have = profile.Enchants[traitName] or 0
+		if have < 1 then return false, "You don't have a " .. traitName .. " enchantment." end
+		profile.Enchants[traitName] = have > 1 and have - 1 or nil
 	end
 
-	profile.Gold -= TraitData.RollCost
-	local trait = TraitData.Roll()
-	profile.Traits[unitName] = trait
-	PlayerData.Refresh(player) -- the trait can change who auto-equip picks
-	return true, nil, trait
+	if current then
+		addEnchant(profile, current)
+	end
+	profile.Traits[unitName] = traitName
+	PlayerData.Refresh(player) -- the enchantment can change who auto-equip picks
+	return true
+end
+
+-- Gives enchantments straight into the bag (tester command)
+function PlayerData.GiveEnchants(player, traitName, count)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	if not TraitData.Get(traitName) then return false, "Unknown enchantment." end
+	profile.Enchants[traitName] = (profile.Enchants[traitName] or 0) + count
+	PlayerData.Sync(player)
+	PlayerData.RequestSave(player)
+	return true
 end
 
 -- Fuses other units into `target` for XP. feed = { [unitName] = copies }.
@@ -563,9 +640,7 @@ function PlayerData.Fuse(player, target, feed)
 		local left = profile.Units[name] - n
 		profile.Units[name] = left > 0 and left or nil
 		if left <= 0 then
-			profile.Traits[name] = nil
-			profile.XP[name] = nil
-			profile.Stars[name] = nil
+			forgetUnit(profile, name)
 		end
 	end
 	profile.XP[target] = math.min(currentXP + gained, maxXP)
