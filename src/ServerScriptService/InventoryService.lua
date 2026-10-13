@@ -1,7 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: InventoryService
--- (replaces the earlier version: every action works on single units by their id now)
+-- (replaces the earlier version: adds "EquipSlot", putting a unit into a chosen team slot)
 -- Handles every button in the inventory and the Traits Cave. The server checks everything,
 -- so a locked unit can never be deleted by a hacked client.
 
@@ -16,7 +16,8 @@ remote.Parent = ReplicatedStorage
 -- Unit ids are numbers (see UnitData.ParseUnits). Actions:
 --   "Lock",        unitId,     true/false
 --   "Delete",      { unitId, ... }
---   "Equip",       unitId,     true/false   (only while auto-equip is off)
+--   "Equip",       unitId,     true/false   (turns auto-equip off)
+--   "EquipSlot",   unitId,     slot number  (team bar: put the unit in that slot, turns auto-equip off)
 --   "AutoEquip",   true/false
 --   "AutoDelete",  rarityName, true/false
 --   "SummonTrait", unitId                   (Traits Cave: replaces the unit's trait, costs Trait Shards)
@@ -51,6 +52,8 @@ remote.OnServerInvoke = function(player, action, a, b)
 		ok, err = PlayerData.DeleteUnits(player, ids)
 	elseif action == "Equip" then
 		ok, err = PlayerData.SetEquipped(player, a, b == true)
+	elseif action == "EquipSlot" then
+		ok, err = PlayerData.EquipToSlot(player, a, b)
 	elseif action == "AutoEquip" then
 		ok, err = PlayerData.SetAutoEquip(player, a == true)
 	elseif action == "AutoDelete" then

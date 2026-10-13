@@ -3,7 +3,8 @@
 -- NAME: PlayerData
 -- (replaces the earlier version: every unit is now its own entry with its own trait, level,
 --  stars and lock, and the inventory has slots (100 to start, more from game passes).
---  Old saves are converted automatically: a stack of 3 becomes 3 separate units.)
+--  Old saves are converted automatically: a stack of 3 becomes 3 separate units.
+--  Units can be put into a chosen team slot, see PlayerData.EquipToSlot.)
 --
 -- Single source of truth for each player's gems, gold, trait shards, pity, units, locks,
 -- team and settings.
@@ -580,12 +581,12 @@ function PlayerData.SetLocked(player, id, locked)
 	return true
 end
 
--- Manual team editing (only while auto-equip is off). Equipping a unit whose name is
--- already on the team swaps it in for that copy.
+-- Manual team editing (turns auto-equip off). Equipping a unit whose name is already on
+-- the team swaps it in for that copy.
 function PlayerData.SetEquipped(player, id, on)
 	local profile = PlayerData.Profiles[player]
 	if not profile then return false, "Still loading." end
-	if profile.AutoEquip then return false, "Turn off auto-equip to pick your team." end
+	profile.AutoEquip = false
 	local u = PlayerData.FindUnit(profile, id)
 	if not u then return false, "You don't have that unit." end
 
@@ -604,8 +605,53 @@ function PlayerData.SetEquipped(player, id, on)
 		table.remove(profile.Equipped, index)
 	end
 
-	PlayerData.Sync(player)
-	PlayerData.RequestSave(player)
+	PlayerData.Refresh(player)
+	return true
+end
+
+-- Puts a unit into team slot `slot` (1 to UnitData.TeamSize), as picked on the team bar.
+--   * the unit is already on the team: it swaps places with whatever is in that slot
+--   * another copy of the same unit is on the team: this copy takes its place, then moves
+--   * the slot holds a different unit: that unit comes off the team
+--   * the slot is empty: the unit goes in the first free slot (slots fill left to right)
+-- Choosing slots by hand turns auto-equip off. Returns ok, errorMessage
+function PlayerData.EquipToSlot(player, id, slot)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	local u = PlayerData.FindUnit(profile, id)
+	if not u then return false, "You don't have that unit." end
+	if typeof(slot) ~= "number" or slot ~= math.floor(slot) or slot < 1 or slot > UnitData.TeamSize then
+		return false, "Pick a team slot."
+	end
+
+	profile.AutoEquip = false
+	local team = profile.Equipped
+	local function moveTo(from)
+		if slot <= #team then
+			team[from], team[slot] = team[slot], team[from]
+		else
+			table.remove(team, from)
+			table.insert(team, id)
+		end
+	end
+
+	local at = table.find(team, id)
+	local same = PlayerData.EquippedUnit(profile, u.Name)
+	if at then
+		moveTo(at)
+	elseif same then
+		local from = table.find(team, same.Id)
+		team[from] = id
+		moveTo(from)
+	elseif slot <= #team then
+		team[slot] = id
+	elseif #team < UnitData.TeamSize then
+		table.insert(team, id)
+	else
+		return false, string.format("Your team is full (%d).", UnitData.TeamSize)
+	end
+
+	PlayerData.Refresh(player)
 	return true
 end
 

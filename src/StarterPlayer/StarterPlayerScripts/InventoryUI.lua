@@ -1,8 +1,8 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: InventoryUI
--- (replaces the earlier version: every unit shows a picture of itself, and traits show as
---  icons. Tiles are kept between refreshes, so pictures aren't rebuilt every change.)
+-- (replaces the earlier version: adds the team bar along the bottom of the lobby screen.
+--  "Put on team" asks you to click the slot to put the unit in.)
 -- Every unit is its own slot in the grid, with its own trait, level, stars and lock. Click a
 -- unit to see it on the right and lock, equip, fuse, evolve or delete it. The top shows
 -- how many of your slots are used.
@@ -283,15 +283,20 @@ evolveNote.TextYAlignment = Enum.TextYAlignment.Top
 -- ===== State =====
 local units, byId = {}, {}
 local equipped = {}  -- [id] = true
+local teamOrder = {} -- unit ids in team slot order
 local selectedId = nil
 local confirmEvolve = false
 local openFuse, askDelete -- set further down
+local refreshTeamBar, startPicking -- the team bar, further down
+local rebuild -- defined at the bottom
 
 local function readState()
 	units, byId = UnitData.ParseUnits(player:GetAttribute("Units"))
 	equipped = {}
+	teamOrder = {}
 	for id in string.gmatch(player:GetAttribute("EquippedIds") or "", "%d+") do
 		equipped[tonumber(id)] = true
+		table.insert(teamOrder, tonumber(id))
 	end
 	table.sort(units, function(a, b)
 		local ra, rb = rarityRank[UnitData.UnitRarity[a.Name]], rarityRank[UnitData.UnitRarity[b.Name]]
@@ -389,8 +394,8 @@ local function refreshDetail()
 	dStatus.Text = table.concat(status, "  ·  ")
 	dStatus.TextColor3 = onTeam and TEAM_GREEN or LOCK_GOLD
 
-	equipBtn.Text = onTeam and "Remove from team" or "Put on team"
-	equipBtn.BackgroundColor3 = autoOn and GRAY or (onTeam and Color3.fromRGB(150, 110, 60) or GREEN)
+	equipBtn.Text = onTeam and "Remove from team" or "Put on team..."
+	equipBtn.BackgroundColor3 = onTeam and Color3.fromRGB(150, 110, 60) or GREEN
 	lockBtn.Text = u.Locked and "Unlock" or "Lock"
 	lockBtn.BackgroundColor3 = u.Locked and Color3.fromRGB(200, 160, 40) or Color3.fromRGB(70, 110, 190)
 	fuseBtn.Text = level >= ProgressData.MaxLevel and "Max level" or "Fuse (feed units for XP)"
@@ -550,15 +555,149 @@ local function rebuildGrid()
 	slotFill.BackgroundColor3 = used >= maxSlots and ERROR_COLOR or (used / maxSlots > 0.85 and LOCK_GOLD or Color3.fromRGB(110, 200, 255))
 end
 
+-- ===== Team bar (bottom of the lobby screen) =====
+-- Your team's slots, always visible in the lobby. "Put on team" starts picking: the slots
+-- light up and you click the one to put the unit in. Clicking a filled slot otherwise opens
+-- the inventory with that unit selected.
+local SLOT_W, SLOT_H, SLOT_GAP = 78, 100, 8
+local PICK_GOLD = Color3.fromRGB(255, 215, 80)
+
+local barGui = Instance.new("ScreenGui")
+barGui.Name = "TeamBarGui"
+barGui.ResetOnSpawn = false
+barGui.DisplayOrder = 4 -- above the inventory window, so slots stay clickable while picking
+barGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+barGui.Parent = player:WaitForChild("PlayerGui")
+
+local barW = UnitData.TeamSize * SLOT_W + (UnitData.TeamSize - 1) * SLOT_GAP + 20
+local bar = frame(barGui, UDim2.new(0.5, 0, 1, -12), UDim2.fromOffset(barW, SLOT_H + 34), PANEL, 0.15)
+bar.AnchorPoint = Vector2.new(0.5, 1)
+corner(bar, 12)
+local barStroke = stroke(bar, WHITE, 1, 0.8)
+local barScale = Instance.new("UIScale")
+barScale.Parent = bar
+local function fitBar()
+	local vp = workspace.CurrentCamera.ViewportSize
+	barScale.Scale = math.min(1, (vp.X - 20) / barW)
+end
+fitBar()
+workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(fitBar)
+
+local barTitle = label(bar, "TEAM", UDim2.fromOffset(12, 4), UDim2.new(1, -24, 0, 20), 12, SUBTLE, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
+local barHint = label(bar, "", UDim2.fromOffset(12, 4), UDim2.new(1, -24, 0, 20), 11, DIM, Enum.Font.Gotham, Enum.TextXAlignment.Right)
+
+-- the "pick a slot" banner that appears above the bar
+local pickBanner = frame(barGui, UDim2.new(0.5, 0, 1, -(SLOT_H + 56)), UDim2.fromOffset(380, 40), Color3.fromRGB(40, 34, 14))
+pickBanner.AnchorPoint = Vector2.new(0.5, 1)
+pickBanner.Visible = false
+corner(pickBanner, 10)
+stroke(pickBanner, PICK_GOLD, 1.5)
+local pickText = label(pickBanner, "", UDim2.fromOffset(12, 0), UDim2.new(1, -110, 1, 0), 14, WHITE, Enum.Font.GothamBold, Enum.TextXAlignment.Left)
+pickText.TextTruncate = Enum.TextTruncate.AtEnd
+local pickCancel = button(pickBanner, "Cancel", UDim2.new(1, -90, 0.5, -14), UDim2.fromOffset(80, 28), GRAY, 13)
+
+local slots = {} -- [slotIndex] = { Frame, Stroke, Plus, Number, Card, CardId }
+local pickingId = nil
+
+local function onSlotClicked(i)
+	if pickingId then
+		local id = pickingId
+		pickingId = nil
+		local wasAuto = player:GetAttribute("AutoEquip") == true
+		if call("EquipSlot", id, i) and wasAuto then
+			showMessage("Auto-equip is off now that you're picking your team.", SUBTLE)
+		end
+		refreshTeamBar()
+		return
+	end
+	-- not picking: open the inventory on this unit
+	local id = teamOrder[i]
+	if id and byId[id] then
+		selectedId = id
+		confirmEvolve = false
+		window.Visible = true
+		rebuild()
+	end
+end
+
+for i = 1, UnitData.TeamSize do
+	local x = 10 + (i - 1) * (SLOT_W + SLOT_GAP)
+	local slot = Instance.new("TextButton")
+	slot.Position = UDim2.fromOffset(x, 26)
+	slot.Size = UDim2.fromOffset(SLOT_W, SLOT_H)
+	slot.Text = ""
+	slot.AutoButtonColor = true
+	slot.BackgroundColor3 = Color3.fromRGB(16, 16, 28)
+	slot.Parent = bar
+	corner(slot, 8)
+	local slotStroke = stroke(slot, WHITE, 1, 0.8)
+	local plus = label(slot, "+", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 26, DIM, Enum.Font.GothamBold)
+	local number = label(slot, tostring(i), UDim2.new(1, -18, 1, -18), UDim2.fromOffset(14, 14), 11, DIM, Enum.Font.GothamBlack)
+	number.ZIndex = 3
+	slots[i] = { Frame = slot, Stroke = slotStroke, Plus = plus, Number = number, Card = nil, CardId = nil }
+
+	slot.Activated:Connect(function() onSlotClicked(i) end)
+end
+
+refreshTeamBar = function()
+	for i, s in ipairs(slots) do
+		local id = teamOrder[i]
+		local u = id and byId[id]
+		-- (re)build the card only when a different unit lands in the slot
+		if s.CardId ~= (u and u.Id or nil) then
+			if s.Card then s.Card.Button:Destroy() end
+			s.Card, s.CardId = nil, nil
+			if u then
+				local card = makeUnitCard(s.Frame, u)
+				card.Button.Size = UDim2.fromScale(1, 1)
+				card.Button.Activated:Connect(function() onSlotClicked(i) end) -- the card covers the slot
+				card.Team.Visible = false
+				s.Card, s.CardId = card, u.Id
+			end
+		end
+		if s.Card and u then
+			updateUnitCard(s.Card, u)
+			s.Card.Team.Visible = false -- everything here is on the team
+		end
+		s.Plus.Visible = u == nil
+		-- picking: every slot glows gold
+		s.Stroke.Color = pickingId and PICK_GOLD or WHITE
+		s.Stroke.Thickness = pickingId and 2.5 or 1
+		s.Stroke.Transparency = pickingId and 0 or 0.8
+		s.Plus.TextColor3 = pickingId and PICK_GOLD or DIM
+	end
+
+	local picking = pickingId and byId[pickingId]
+	if pickingId and not picking then pickingId = nil end
+	pickBanner.Visible = picking ~= nil
+	if picking then
+		pickText.Text = "Click a slot for " .. picking.Name
+	end
+	barStroke.Color = picking and PICK_GOLD or WHITE
+	barStroke.Transparency = picking and 0.2 or 0.8
+	local autoOn = player:GetAttribute("AutoEquip") == true
+	barHint.Text = picking and "" or (autoOn and "Auto-equip ON" or string.format("%d / %d", #teamOrder, UnitData.TeamSize))
+end
+
+startPicking = function(id)
+	pickingId = id
+	refreshTeamBar()
+end
+
+pickCancel.Activated:Connect(function()
+	pickingId = nil
+	refreshTeamBar()
+end)
+
 -- ===== Detail actions =====
 equipBtn.Activated:Connect(function()
 	local u = selectedId and byId[selectedId]
 	if not u then return end
-	if player:GetAttribute("AutoEquip") == true then
-		showMessage("Turn off auto-equip to pick your team by hand.")
-		return
+	if equipped[u.Id] then
+		call("Equip", u.Id, false)
+	else
+		startPicking(u.Id) -- choose a slot on the team bar
 	end
-	call("Equip", u.Id, not equipped[u.Id])
 end)
 
 lockBtn.Activated:Connect(function()
@@ -884,7 +1023,7 @@ moreSlotsBtn.Activated:Connect(function()
 end)
 
 -- ===== Rebuild =====
-local function rebuild()
+rebuild = function()
 	readState()
 	if selectedId and not byId[selectedId] then
 		selectedId = nil
@@ -895,6 +1034,7 @@ local function rebuild()
 	rebuildGrid()
 	refreshDetail()
 	if fuseWin.Visible then refreshFuse() end
+	refreshTeamBar()
 end
 
 -- Several attributes change together; rebuild once per frame
@@ -924,6 +1064,11 @@ end)
 local function updateVisibility()
 	local inMatch = player:GetAttribute("InMatch") == true
 	openBtn.Visible = not inMatch
+	barGui.Enabled = not inMatch -- the match has its own hotbar
+	if inMatch and pickingId then
+		pickingId = nil
+		refreshTeamBar()
+	end
 	if inMatch then
 		window.Visible = false
 		closeDialog()
