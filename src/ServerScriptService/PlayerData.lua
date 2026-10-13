@@ -65,7 +65,12 @@ PlayerData.SettingDefaults = {
 local function cleanSettings(t)
 	local out = {}
 	for name, default in pairs(PlayerData.SettingDefaults) do
-		local v = type(t) == "table" and t[name]
+		-- (careful: `type(t) == "table" and t[name]` would give false when t is missing,
+		-- which looks like a real "off" and wiped out the defaults)
+		local v = nil
+		if type(t) == "table" then
+			v = t[name]
+		end
 		if type(v) == "boolean" then
 			out[name] = v
 		else
