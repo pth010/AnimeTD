@@ -1,24 +1,29 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: ProgressData
--- (replaces the earlier version: units cap at level 5, each level adds +10% base damage,
---  and every level needs more XP than the last, see LevelXP)
+-- (replaces the earlier version: levels go to 100 at +2% base damage each, every level
+--  needs a little more XP than the last, and each evolution star adds +20% damage)
 -- Unit levels (from fusing) and evolution stars. Both are done in the Inventory.
 --
 -- FUSE: feed other units into a unit to give it XP. Each unit fed gives FodderXP for its
---   rarity. Every level above 1 adds +10% of the unit's base damage (Lv 5 = +40%).
---   Cash units get +10% income per level instead.
--- EVOLVE: spend extra copies of the SAME unit (plus some Gold) to give it a star.
---   Stars stack on top of levels. You always keep one copy of the unit.
+--   rarity. Every level above 1 adds +2% of the unit's base damage (Lv 100 = +198%).
+--   Cash units get +2% income per level instead.
+-- EVOLVE: spend spare copies of the SAME unit (plus some Gold) to give it a star.
+--   Each star adds +20% damage on top of the leveled damage (base damage with the level
+--   bonus already in it). Stars add up: 3 stars = +60% of the leveled damage.
+--   Example: base 100 damage at Lv 51 (+100%) = 200, with 2 stars (+40%) = 280.
 
 local ProgressData = {}
 
-ProgressData.MaxLevel = 5
-ProgressData.PerLevel = 0.10 -- +10% base damage (or income) per level above 1
+ProgressData.MaxLevel = 100
+ProgressData.PerLevel = 0.02 -- +2% base damage (or income) per level above 1
 
--- XP needed for each level-up: LevelXP[1] takes a unit from Lv 1 to Lv 2, and so on.
--- Each step costs more than the last. Lv 1 to Lv 5 is 2,400 XP in total.
-ProgressData.LevelXP = { 200, 400, 700, 1100 }
+-- XP needed for each level-up grows a little every level:
+--   Lv 1 -> 2 takes LevelXPBase, and each level after that takes LevelXPGrowth more.
+--   With 100 and 10: Lv 1->2 = 100 XP, Lv 50->51 = 590 XP, Lv 99->100 = 1,080 XP,
+--   and Lv 1 to Lv 100 is 58,410 XP in total.
+ProgressData.LevelXPBase = 100
+ProgressData.LevelXPGrowth = 10
 
 -- XP one copy gives when it is fused into another unit
 ProgressData.FodderXP = {
@@ -31,16 +36,17 @@ ProgressData.FodderXP = {
 
 -- Evolutions[n] = what it takes to reach n stars, and the bonus each star adds
 ProgressData.Evolutions = {
-	{ Copies = 2, Gold = 250,  Damage = 0.15, Range = 0.05, Income = 0.10 }, -- 1 star
+	{ Copies = 2, Gold = 250,  Damage = 0.20, Range = 0.05, Income = 0.10 }, -- 1 star
 	{ Copies = 3, Gold = 500,  Damage = 0.20, Range = 0.05, Income = 0.15 }, -- 2 stars
-	{ Copies = 4, Gold = 1000, Damage = 0.30, Range = 0.10, Income = 0.25 }, -- 3 stars
+	{ Copies = 4, Gold = 1000, Damage = 0.20, Range = 0.10, Income = 0.25 }, -- 3 stars
 }
 ProgressData.MaxStars = #ProgressData.Evolutions
 ProgressData.StarColor = Color3.fromRGB(255, 215, 80)
 
 -- XP needed to go from `level` to `level + 1` (0 at max level)
 function ProgressData.XPToNext(level)
-	return ProgressData.LevelXP[level] or 0
+	if level >= ProgressData.MaxLevel then return 0 end
+	return ProgressData.LevelXPBase + ProgressData.LevelXPGrowth * (level - 1)
 end
 
 -- Total XP needed to reach max level
