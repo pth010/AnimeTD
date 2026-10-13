@@ -1,7 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: InventoryService
--- (replaces the earlier version: adds "SaveLayout" for the Screen Layout panel)
+-- (replaces the earlier version: adds "SaveSettings", and the layout and settings can be
+--  saved during a match too)
 -- Handles every button in the inventory and the Traits Cave. The server checks everything,
 -- so a locked unit can never be deleted by a hacked client.
 
@@ -24,6 +25,8 @@ remote.Parent = ReplicatedStorage
 --   "Fuse",        targetId,   { unitId, ... }   (feeds those units in for XP)
 --   "Evolve",      unitId                   (uses spare copies + Gold, see ProgressData)
 --   "SaveLayout",  { [element] = { X, Y, S } }  (Screen Layout panel, see LayoutUI)
+--   "SaveSettings", { [name] = true/false }   (Settings popup, see LayoutUI)
+-- SaveLayout and SaveSettings also work during a match; everything else is lobby only.
 
 -- Turns a client-sent list into a clean list of numbers (or nil)
 local function idList(value)
@@ -40,6 +43,15 @@ remote.OnServerInvoke = function(player, action, a, b)
 	if typeof(action) ~= "string" then
 		return { Success = false, Error = "Bad request." }
 	end
+	-- screen settings can change any time, even mid-match
+	if action == "SaveLayout" then
+		local ok, err = PlayerData.SaveLayout(player, a)
+		return { Success = ok == true, Error = err }
+	elseif action == "SaveSettings" then
+		local ok, err = PlayerData.SaveSettings(player, a)
+		return { Success = ok == true, Error = err }
+	end
+
 	if player:GetAttribute("InMatch") then
 		return { Success = false, Error = "Not during a match." }
 	end
@@ -68,8 +80,6 @@ remote.OnServerInvoke = function(player, action, a, b)
 		ok, err, xp = PlayerData.Fuse(player, a, ids)
 	elseif action == "Evolve" then
 		ok, err = PlayerData.Evolve(player, a)
-	elseif action == "SaveLayout" then
-		ok, err = PlayerData.SaveLayout(player, a)
 	else
 		return { Success = false, Error = "Unknown action." }
 	end

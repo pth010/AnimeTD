@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: enemy health bars are sized in studs too, so they shrink
---  with distance like the enemies instead of staying the same size on screen)
+-- (replaces the earlier version: health bars and their HP numbers are named "HealthBar" and
+--  "HPText" so the Settings popup can hide them on a player's screen)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -244,6 +244,7 @@ local function makeHealthBar(parent, maxHp, offsetY, name)
 	local wide = name ~= nil
 	local studs = wide and BOSS_BAR_STUDS or HEALTH_BAR_STUDS
 	local gui = Instance.new("BillboardGui")
+	gui.Name = "HealthBar" -- the Settings popup can hide these on your screen
 	gui.Size = UDim2.fromScale(studs.X, studs.Y)
 	gui.StudsOffset = Vector3.new(0, offsetY, 0)
 	gui.AlwaysOnTop = true
@@ -283,6 +284,7 @@ local function makeHealthBar(parent, maxHp, offsetY, name)
 
 	-- the HP number, written on top of the bar (scales with it)
 	local text = Instance.new("TextLabel")
+	text.Name = "HPText"
 	text.AnchorPoint = Vector2.new(0.5, 0.5)
 	text.Position = UDim2.fromScale(0.5, 0.5)
 	text.Size = UDim2.fromScale(1, 0.9)

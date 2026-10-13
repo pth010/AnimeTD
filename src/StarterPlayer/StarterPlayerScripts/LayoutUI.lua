@@ -1,10 +1,15 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: LayoutUI
--- The Screen Layout panel: move and resize the team bar, the Inventory button and the
--- Gems / Gold / Shards counter with sliders. Open it with the gear button (lobby only).
--- Changes show straight away and are saved with your data (see PlayerData.SaveLayout),
--- so the layout is the same next time you play.
+-- (replaces the earlier version: the gear button opens a Settings popup, in the lobby and in
+--  matches; Screen Layout is one of its options)
+-- The Settings popup (gear button, always on screen):
+--   * Screen Layout: move and resize the team bar, the Inventory button and the
+--     Gems / Gold / Shards counter with sliders
+--   * Trait icons over units, enemy health bars, HP numbers on health bars: on / off
+--   * Auto-equip best team: on / off (lobby only)
+-- Everything is saved with your data (PlayerData.SaveLayout / SaveSettings), so it's the
+-- same next time you play.
 --
 -- To add another element: give its GuiObject a Name, then add it to ELEMENTS below and to
 -- PlayerData.LayoutElements on the server.
@@ -147,7 +152,7 @@ gui.DisplayOrder = 5
 gui.Parent = playerGui
 
 local gear = button(gui, "⚙", UDim2.new(0, 10, 0.5, 28), UDim2.fromOffset(40, 40), GLASS, 22)
-gear.Name = "LayoutButton"
+gear.Name = "SettingsButton"
 
 local PW, PH = 360, 330
 local panel = Instance.new("Frame")
@@ -308,25 +313,175 @@ local function closePanel()
 	save()
 end
 
+-- ===== Settings popup =====
+local SW, SH = 340, 300
+local settingsPanel = Instance.new("Frame")
+settingsPanel.AnchorPoint = Vector2.new(0.5, 0.5)
+settingsPanel.Position = UDim2.fromScale(0.5, 0.45)
+settingsPanel.Size = UDim2.fromOffset(SW, SH)
+settingsPanel.BackgroundColor3 = PANEL
+settingsPanel.Visible = false
+settingsPanel.Active = true
+settingsPanel.Parent = gui
+corner(settingsPanel, 14)
+local settingsStroke = Instance.new("UIStroke")
+settingsStroke.Color = WHITE
+settingsStroke.Transparency = 0.8
+settingsStroke.Parent = settingsPanel
+
+label(settingsPanel, "Settings", UDim2.fromOffset(16, 10), UDim2.fromOffset(200, 28), 22, WHITE, Enum.Font.GothamBlack)
+local settingsClose = button(settingsPanel, "X", UDim2.new(1, -42, 0, 10), UDim2.fromOffset(30, 30), Color3.fromRGB(190, 70, 70), 14)
+
+-- on/off settings (the server keeps them; defaults are all on)
+local settings = { TraitIcons = true, HealthBars = true, HPNumbers = true }
+local function parseSettings(text)
+	for name, v in string.gmatch(text or "", "([^;=]+)=(%d)") do
+		if settings[name] ~= nil then
+			settings[name] = v == "1"
+		end
+	end
+end
+parseSettings(player:GetAttribute("Settings"))
+
+-- Shows / hides the floating things in the world on YOUR screen only
+local function applyVisual(inst)
+	if inst:IsA("BillboardGui") then
+		if inst.Name == "TraitBadge" then
+			inst.Enabled = settings.TraitIcons
+		elseif inst.Name == "HealthBar" then
+			inst.Enabled = settings.HealthBars
+		end
+	elseif inst:IsA("TextLabel") and inst.Name == "HPText" then
+		inst.Visible = settings.HPNumbers
+	end
+end
+local function applyAllVisuals()
+	for _, inst in ipairs(workspace:GetDescendants()) do
+		applyVisual(inst)
+	end
+end
+workspace.DescendantAdded:Connect(applyVisual)
+applyAllVisuals()
+
+-- One row: a title on the left, a control on the right
+local ROW_Y0, ROW_H = 52, 44
+local function row(i, title)
+	local y = ROW_Y0 + (i - 1) * ROW_H
+	local line = Instance.new("Frame")
+	line.Position = UDim2.fromOffset(16, y + ROW_H - 1)
+	line.Size = UDim2.fromOffset(SW - 32, 1)
+	line.BackgroundColor3 = WHITE
+	line.BackgroundTransparency = 0.92
+	line.BorderSizePixel = 0
+	line.Parent = settingsPanel
+	label(settingsPanel, title, UDim2.fromOffset(16, y), UDim2.fromOffset(SW - 110, ROW_H), 14, WHITE)
+	return y
+end
+
+-- A pill on/off switch. Returns a function that redraws it from the current value.
+local function toggle(y, get, set)
+	local switch = Instance.new("TextButton")
+	switch.Text = ""
+	switch.AutoButtonColor = false
+	switch.Position = UDim2.new(1, -72, 0, y + (ROW_H - 26) / 2)
+	switch.Size = UDim2.fromOffset(52, 26)
+	switch.Parent = settingsPanel
+	corner(switch, "round")
+	local knob = Instance.new("Frame")
+	knob.Size = UDim2.fromOffset(20, 20)
+	knob.BackgroundColor3 = WHITE
+	knob.Parent = switch
+	corner(knob, "round")
+	local function draw()
+		local on = get()
+		switch.BackgroundColor3 = on and Color3.fromRGB(60, 170, 100) or GRAY
+		knob.Position = on and UDim2.fromOffset(29, 3) or UDim2.fromOffset(3, 3)
+	end
+	switch.Activated:Connect(function()
+		set(not get())
+		draw()
+	end)
+	draw()
+	return draw
+end
+
+local function saveSettings()
+	pcall(function()
+		inventoryRemote:InvokeServer("SaveSettings", settings)
+	end)
+end
+
+local openLayout -- set below
+
+local layoutY = row(1, "Screen Layout")
+local editLayout = button(settingsPanel, "Edit", UDim2.new(1, -92, 0, layoutY + 7), UDim2.fromOffset(72, 30), ACCENT, 13)
+editLayout.TextColor3 = Color3.fromRGB(10, 30, 45)
+
+local drawers = {}
+for i, item in ipairs({
+	{ "TraitIcons", "Trait icons over units" },
+	{ "HealthBars", "Enemy health bars" },
+	{ "HPNumbers", "HP numbers on health bars" },
+}) do
+	local key = item[1]
+	local y = row(i + 1, item[2])
+	drawers[key] = toggle(y, function() return settings[key] end, function(v)
+		settings[key] = v
+		applyAllVisuals()
+		saveSettings()
+	end)
+end
+
+-- auto-equip lives on the server (the same switch as in the Inventory); lobby only
+local autoY = row(5, "Auto-equip best team")
+local autoNote = label(settingsPanel, "lobby only", UDim2.new(1, -150, 0, autoY), UDim2.fromOffset(70, ROW_H), 11, SUBTLE, Enum.Font.Gotham, Enum.TextXAlignment.Right)
+local drawAuto = toggle(autoY, function() return player:GetAttribute("AutoEquip") == true end, function(v)
+	if player:GetAttribute("InMatch") == true then return end
+	pcall(function()
+		inventoryRemote:InvokeServer("AutoEquip", v)
+	end)
+end)
+player:GetAttributeChangedSignal("AutoEquip"):Connect(drawAuto)
+
+-- settings changed somewhere else (e.g. another server) while not looking
+player:GetAttributeChangedSignal("Settings"):Connect(function()
+	parseSettings(player:GetAttribute("Settings"))
+	for _, draw in pairs(drawers) do draw() end
+	applyAllVisuals()
+end)
+
+local function closeSettings()
+	settingsPanel.Visible = false
+end
+
+local function openSettings()
+	closePanel()
+	autoNote.Visible = player:GetAttribute("InMatch") == true
+	settingsPanel.Visible = true
+	drawAuto()
+end
+
+openLayout = function()
+	closeSettings()
+	panelOpen = true
+	panel.Visible = true
+	showCurrent()
+end
+
 gear.Activated:Connect(function()
-	if panel.Visible then
+	if settingsPanel.Visible then
+		closeSettings()
+	elseif panel.Visible then
 		closePanel()
 	else
-		panelOpen = true
-		panel.Visible = true
-		showCurrent()
+		openSettings()
 	end
 end)
+settingsClose.Activated:Connect(closeSettings)
+editLayout.Activated:Connect(function() openLayout() end)
 closeBtn.Activated:Connect(closePanel)
 doneBtn.Activated:Connect(closePanel)
 
--- Lobby only (the layout carries into matches, the panel doesn't open there)
-local function updateVisibility()
-	local inMatch = player:GetAttribute("InMatch") == true
-	gear.Visible = not inMatch
-	if inMatch then
-		closePanel()
-	end
-end
-updateVisibility()
-player:GetAttributeChangedSignal("InMatch"):Connect(updateVisibility)
+player:GetAttributeChangedSignal("InMatch"):Connect(function()
+	autoNote.Visible = player:GetAttribute("InMatch") == true
+end)

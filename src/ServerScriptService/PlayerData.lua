@@ -5,7 +5,8 @@
 --  stars and lock, and the inventory has slots (100 to start, more from game passes).
 --  Old saves are converted automatically: a stack of 3 becomes 3 separate units.
 --  Units can be put into a chosen team slot, see PlayerData.EquipToSlot. Each player's screen
---  layout (where the team bar, Inventory button and currency counter sit) is saved too.)
+--  layout (where the team bar, Inventory button and currency counter sit) is saved too, and
+--  so are their settings from the Settings popup.)
 --
 -- Single source of truth for each player's gems, gold, trait shards, pity, units, locks,
 -- team and settings.
@@ -53,6 +54,26 @@ PlayerData.LayoutElements = { TeamBar = true, InventoryButton = true, Currency =
 local LAYOUT_MOVE_LIMIT = 0.5          -- up to half a screen in any direction
 local LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX = 0.6, 1.6
 
+-- On/off settings from the Settings popup, and what they are for a new player
+PlayerData.SettingDefaults = {
+	TraitIcons = true, -- trait icons over placed units
+	HealthBars = true, -- health bars over enemies
+	HPNumbers = true,  -- the HP number written on those health bars
+}
+
+local function cleanSettings(t)
+	local out = {}
+	for name, default in pairs(PlayerData.SettingDefaults) do
+		local v = type(t) == "table" and t[name]
+		if type(v) == "boolean" then
+			out[name] = v
+		else
+			out[name] = default
+		end
+	end
+	return out
+end
+
 local function cleanLayout(t)
 	local out = {}
 	if type(t) ~= "table" then return out end
@@ -82,6 +103,7 @@ end
 --   PassSlots  slots from owned game passes (not saved, see UnitData.SlotPasses)
 --   UILayout   [element] = { X, Y, S }: how far each screen element is moved (fractions of
 --              the screen) and its size, set in the Screen Layout panel (see LayoutUI)
+--   Settings   [name] = true/false from the Settings popup (see PlayerData.SettingDefaults)
 
 -- ===== Units =====
 local function newUnit(profile, unitName)
@@ -258,6 +280,13 @@ function PlayerData.Sync(player)
 	end
 	table.sort(layout)
 	player:SetAttribute("UILayout", table.concat(layout, ";")) -- "TeamBar=0.1000:-0.0500:1.2000"
+
+	local settings = {}
+	for name, on in pairs(profile.Settings) do
+		table.insert(settings, name .. "=" .. (on and 1 or 0))
+	end
+	table.sort(settings)
+	player:SetAttribute("Settings", table.concat(settings, ";")) -- "HPNumbers=1;HealthBars=1;TraitIcons=0"
 end
 
 -- ===== Loading =====
@@ -381,6 +410,7 @@ function PlayerData.Load(player)
 		BonusSlots = 0,
 		PassSlots = 0,
 		UILayout = {},
+		Settings = cleanSettings(nil),
 		Busy = false,
 		SavePending = false,
 		CanSave = ok, -- never save over a profile we failed to load
@@ -393,6 +423,7 @@ function PlayerData.Load(player)
 		profile.Pity = tonumber(saved.Pity) or 0
 		profile.BonusSlots = cleanNumber(saved.BonusSlots, 0, 100000) or 0
 		profile.UILayout = cleanLayout(saved.UILayout)
+		profile.Settings = cleanSettings(saved.Settings)
 
 		if type(saved.Units) == "table" then
 			if saved.Version == SAVE_VERSION then
@@ -481,6 +512,7 @@ function PlayerData.Save(player)
 				Cleared = clearedList,
 				BonusSlots = profile.BonusSlots,
 				UILayout = profile.UILayout,
+				Settings = profile.Settings,
 			}
 		end)
 	end)
@@ -549,6 +581,16 @@ function PlayerData.SaveLayout(player, layout)
 	local profile = PlayerData.Profiles[player]
 	if not profile then return false, "Still loading." end
 	profile.UILayout = cleanLayout(layout)
+	PlayerData.Sync(player)
+	PlayerData.RequestSave(player)
+	return true
+end
+
+-- Saves the on/off settings from the Settings popup
+function PlayerData.SaveSettings(player, settings)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	profile.Settings = cleanSettings(settings)
 	PlayerData.Sync(player)
 	PlayerData.RequestSave(player)
 	return true
