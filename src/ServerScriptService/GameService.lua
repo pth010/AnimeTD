@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: unit name tags use a rounded cartoon font with a smooth
---  outline, and no longer show the level)
+-- (replaces the earlier version: unit name tags are hidden until you click the unit, and
+--  trait icons show within 150 studs)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -179,14 +179,24 @@ local function drawBeam(arena, a, b, color)
 	Debris:AddItem(beam, 0.1)
 end
 
+-- How close you need to be to see a unit's trait icon and (once clicked) its name
+local TAG_DISTANCE = 150
+
 -- Floating text over a unit (its name, or a "+$250" cash pop). A rounded cartoon font with
 -- a smooth, thick outline (a UIStroke, which stays crisp where the old text stroke looked jagged).
-local function makeNameTag(parent, text, offsetY)
+-- hidden = true for unit names: they start switched off, and PlacementUI switches a unit's
+-- name on (only on that player's screen) while they have it clicked.
+local function makeNameTag(parent, text, offsetY, hidden)
 	local gui = Instance.new("BillboardGui")
-	gui.Size = UDim2.fromOffset(170, 28)
+	gui.Size = UDim2.fromOffset(150, 22)
 	gui.StudsOffset = Vector3.new(0, offsetY, 0)
 	gui.AlwaysOnTop = true
 	gui.LightInfluence = 0
+	if hidden then
+		gui.Name = "NameTag"
+		gui.Enabled = false
+		gui.MaxDistance = TAG_DISTANCE
+	end
 	gui.Parent = parent
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
@@ -194,18 +204,19 @@ local function makeNameTag(parent, text, offsetY)
 	label.TextColor3 = Color3.new(1, 1, 1)
 	label.TextStrokeTransparency = 1 -- the UIStroke below draws the outline instead
 	label.Font = Enum.Font.FredokaOne
-	label.TextSize = 19
+	label.TextSize = 14
 	label.Text = text
 	label.Parent = gui
 	local outline = Instance.new("UIStroke")
 	outline.Color = Color3.fromRGB(25, 20, 40)
-	outline.Thickness = 2.5
+	outline.Thickness = 2
 	outline.LineJoinMode = Enum.LineJoinMode.Round
 	outline.Parent = label
 	return label
 end
 
--- The unit's trait icon floating just above its name tag (the same icon as in the menus)
+-- The unit's trait icon floating just above its name tag (the same icon as in the menus).
+-- offsetY should match the name tag's, the icon lifts itself above it.
 local function makeTraitBadge(parent, traitName, offsetY)
 	local icon = TraitData.MakeIcon(traitName, 30)
 	if not icon then return nil end
@@ -213,8 +224,10 @@ local function makeTraitBadge(parent, traitName, offsetY)
 	gui.Name = "TraitBadge"
 	gui.Size = UDim2.fromOffset(30, 30)
 	gui.StudsOffset = Vector3.new(0, offsetY, 0)
+	-- lifted by its own height in pixels, so it sits just above the name tag at any zoom
+	gui.SizeOffset = Vector2.new(0, 1.25)
 	gui.AlwaysOnTop = true
-	gui.MaxDistance = 200
+	gui.MaxDistance = TAG_DISTANCE
 	gui.Parent = parent
 	icon.Parent = gui
 	return gui
@@ -681,9 +694,9 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 	part.Anchored = true
 	part.CanCollide = false
 	part.Position = spot + Vector3.new(0, 2.8, 0)
-	local label = makeNameTag(part, unitName, 3.6)
+	local label = makeNameTag(part, unitName, 3.6, true)
 	if trait then
-		makeTraitBadge(part, trait, 5.2)
+		makeTraitBadge(part, trait, 3.6)
 	end
 
 	-- Start out facing the nearest bit of path

@@ -1,7 +1,7 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: PlacementUI
--- (replaces the earlier version: range previews include unit levels and evolution stars)
+-- (replaces the earlier version: a unit's name tag shows only while you have it clicked)
 -- HUD (wave, base HP, cash), unit hotbar, click-to-place with a range preview.
 -- Controls: click a unit in the hotbar, then click a green plot to place it.
 -- Click a placed unit (with nothing selected) to upgrade or sell it.
@@ -159,8 +159,18 @@ rangeRing.Transparency = 0.75
 local inspected = nil
 local inspectConns = {}
 
+-- Units' name tags are hidden (GameService makes them switched off). Show the clicked one's.
+-- This only changes your own screen.
+local function setNameTagShown(part, shown)
+	local tag = part and part:FindFirstChild("NameTag")
+	if tag and tag:IsA("BillboardGui") then
+		tag.Enabled = shown
+	end
+end
+
 local function closePanel()
 	panel.Visible = false
+	setNameTagShown(inspected, false)
 	inspected = nil
 	rangeRing.Parent = nil
 	for _, c in ipairs(inspectConns) do c:Disconnect() end
@@ -210,6 +220,7 @@ end
 local function openPanel(part)
 	closePanel()
 	inspected = part
+	setNameTagShown(part, true)
 	table.insert(inspectConns, part.AttributeChanged:Connect(refreshPanel))
 	table.insert(inspectConns, part.AncestryChanged:Connect(refreshPanel))
 	panel.Visible = true
