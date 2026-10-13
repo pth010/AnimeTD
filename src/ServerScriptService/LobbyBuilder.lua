@@ -1,18 +1,18 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: LobbyBuilder
--- (replaces the earlier version: adds the Traits Cave, where you summon trait enchantments)
+-- (replaces the earlier version: adds the Traits Cave, where you summon traits onto your units)
 -- Builds the lobby room at runtime:
 --   * a 240 x 240 stud square room, 40 studs tall, with walls, roof and ceiling lights
 --   * the player spawn near the front wall
 --   * the Wishing Fountain (walk up to it and the summon window pops up) with its own sign
---   * the Traits Cave across from it (walk inside and the enchantment summon window pops up)
+--   * the Traits Cave across from it (walk inside and the trait summon window pops up)
 --   * FIVE team queue pads along the back wall, each with a standing sign board that
 --     shows the team name and the live queue status
 -- Assumes the default 512x512 Baseplate (the room is centered on the origin).
 -- If Workspace.Lobby already exists (you built your own), this script does nothing.
 -- A custom lobby needs: Lobby.LobbySpawn, Lobby.SummonAltar (a flat part marking the summon
--- area), Lobby.TraitCave (a flat part marking the enchantment summon area), and Lobby.QueuePads
+-- area), Lobby.TraitCave (a flat part marking the trait summon area), and Lobby.QueuePads
 -- containing Pad1..Pad5 (the parts to stand on) and Sign1..Sign5 (parts holding a
 -- SurfaceGui named QueueGui with a TextLabel named Label inside).
 
@@ -360,8 +360,8 @@ local toSpawn = Vector3.new(spawn.Position.X - altarPos.X, 0, spawn.Position.Z -
 local signPos = altarPos - toSpawn * 19
 makeSignBoard(lobby, "SummonSign", signPos, MAGIC, "SUMMON", "Walk up to the Wishing Fountain to get new units!", toSpawn, 13)
 
--- ===== Traits Cave (the enchantment summon spot, front-right area) =====
--- A rocky cave whose entrance faces the walkway. Walk inside and the enchantment window
+-- ===== Traits Cave (the trait summon spot, front-right area) =====
+-- A rocky cave whose entrance faces the walkway. Walk inside and the trait summon window
 -- pops up (TraitCaveUI checks the invisible TraitCave trigger covering the cave floor).
 local cavePos = CENTER + Vector3.new(85, 0, 55)
 local cave = Instance.new("Folder")
@@ -476,7 +476,7 @@ traitSparkles.SpreadAngle = Vector2.new(180, 180)
 traitSparkles.Rate = 14
 traitSparkles.Parent = traitCrystal
 
--- The invisible trigger: standing anywhere inside the cave opens the enchantment window
+-- The invisible trigger: standing anywhere inside the cave opens the trait summon window
 local caveTrigger = makePart(lobby, "TraitCave", Vector3.new(CAVE_INNER * 2, 1, CAVE_INNER * 2), cavePos + Vector3.new(0, 0.9, 0), CAVE_CRYSTALS[1])
 caveTrigger.Transparency = 1
 caveTrigger.CanCollide = false
@@ -494,7 +494,7 @@ end)
 local caveSignPos = cavePos + Vector3.new(-26, 0, 26)
 local caveToSpawn = Vector3.new(spawn.Position.X - caveSignPos.X, 0, spawn.Position.Z - caveSignPos.Z).Unit
 makeSignBoard(lobby, "TraitCaveSign", caveSignPos, CAVE_CRYSTALS[1], "TRAITS CAVE",
-	"Walk inside to summon trait enchantments for your units!", caveToSpawn, 13)
+	"Walk inside to summon traits onto your units!", caveToSpawn, 13)
 
 -- ===== Five team queue pads (back wall) =====
 for i = 1, NUM_PADS do

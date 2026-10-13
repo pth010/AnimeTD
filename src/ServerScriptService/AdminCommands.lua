@@ -13,7 +13,6 @@
 --   !unit frost mage 3      give yourself 3 copies (names aren't case-sensitive,
 --                           and the start of a name is enough: "!unit starfall")
 --   !trait blade novice lord  put a trait on a unit you own ("!trait blade novice none" removes it)
---   !enchant lord 3         put 3 Lord enchantments in your bag (the count is optional)
 --   !xp frost mage 5000     give a unit you own fusion XP (levels it up)
 --   !stars frost mage 3     set a unit's evolution stars (0-3)
 -- Negative numbers work for gems, gold and cash (e.g. "!gems -500").
@@ -171,20 +170,6 @@ function commands.trait(player, args)
 	local ok, err = PlayerData.SetTrait(player, unitName, traitName)
 	if not ok then return err end
 	print(string.format("[AdminCommands] %s's %s now has trait %s", player.Name, unitName, traitName or "none"))
-end
-
-function commands.enchant(player, args)
-	local namePart, numberPart = string.match(args, "^(.-)%s+(%d+)$")
-	namePart = string.lower(namePart or args)
-	local count = math.clamp(tonumber(numberPart) or 1, 1, 100)
-	for _, trait in ipairs(TraitData.Traits) do
-		if string.lower(trait.Name) == namePart then
-			local ok, err = PlayerData.GiveEnchants(player, trait.Name, count)
-			if not ok then return err end
-			return
-		end
-	end
-	return "usage: !enchant <trait> [count]   (traits: Lord, Celestial, Midas, Sharp, ...)"
 end
 
 -- "frost mage 5000" -> unit name, number
