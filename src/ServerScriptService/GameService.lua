@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: unit name tags are hidden until you click the unit, and
---  trait icons show within 150 studs)
+-- (replaces the earlier version: the trait icon over a unit is sized in studs, so it shrinks
+--  with distance like the unit instead of staying the same size on screen)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -215,18 +215,20 @@ local function makeNameTag(parent, text, offsetY, hidden)
 	return label
 end
 
--- The unit's trait icon floating just above its name tag (the same icon as in the menus).
--- offsetY should match the name tag's, the icon lifts itself above it.
+-- The unit's trait icon floating above its head (the same icon as in the menus). It's sized
+-- in studs, not pixels, so it stays the same size in the world: it shrinks as you move away,
+-- just like the unit under it.
+local TRAIT_ICON_STUDS = 1.8 -- how wide the icon is, in studs
 local function makeTraitBadge(parent, traitName, offsetY)
 	local icon = TraitData.MakeIcon(traitName, 30)
 	if not icon then return nil end
+	icon.Size = UDim2.fromScale(1, 1) -- fill the billboard, whatever size it is on screen
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "TraitBadge"
-	gui.Size = UDim2.fromOffset(30, 30)
+	gui.Size = UDim2.fromScale(TRAIT_ICON_STUDS, TRAIT_ICON_STUDS)
 	gui.StudsOffset = Vector3.new(0, offsetY, 0)
-	-- lifted by its own height in pixels, so it sits just above the name tag at any zoom
-	gui.SizeOffset = Vector2.new(0, 1.25)
 	gui.AlwaysOnTop = true
+	gui.LightInfluence = 0
 	gui.MaxDistance = TAG_DISTANCE
 	gui.Parent = parent
 	icon.Parent = gui
@@ -696,7 +698,7 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 	part.Position = spot + Vector3.new(0, 2.8, 0)
 	local label = makeNameTag(part, unitName, 3.6, true)
 	if trait then
-		makeTraitBadge(part, trait, 3.6)
+		makeTraitBadge(part, trait, 5.4) -- above the name tag (3.6)
 	end
 
 	-- Start out facing the nearest bit of path
