@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: the trait icon over a unit is sized in studs, so it shrinks
---  with distance like the unit instead of staying the same size on screen)
+-- (replaces the earlier version: enemy health bars are sized in studs too, so they shrink
+--  with distance like the enemies instead of staying the same size on screen)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -236,51 +236,61 @@ local function makeTraitBadge(parent, traitName, offsetY)
 end
 
 -- A health bar floating over an enemy. Returns a function that updates it.
+-- Sized in studs, not pixels (like the trait icons over units), so it stays the same size in
+-- the world and shrinks with distance instead of staying the same size on screen.
+local HEALTH_BAR_STUDS = Vector2.new(3.2, 0.55) -- normal enemies: width, height
+local BOSS_BAR_STUDS = Vector2.new(6.5, 1.4)    -- bosses: their name on top, then the bar
 local function makeHealthBar(parent, maxHp, offsetY, name)
 	local wide = name ~= nil
+	local studs = wide and BOSS_BAR_STUDS or HEALTH_BAR_STUDS
 	local gui = Instance.new("BillboardGui")
-	gui.Size = UDim2.fromOffset(wide and 160 or 80, wide and 34 or 15)
+	gui.Size = UDim2.fromScale(studs.X, studs.Y)
 	gui.StudsOffset = Vector3.new(0, offsetY, 0)
 	gui.AlwaysOnTop = true
+	gui.LightInfluence = 0
 	gui.MaxDistance = 250
 	gui.Parent = parent
 
+	-- everything inside uses fractions of the bar, so it all scales together
+	local barShare = wide and 0.5 or 1 -- how much of the height the bar itself takes
 	if wide then
 		local title = Instance.new("TextLabel")
-		title.Size = UDim2.new(1, 0, 0, 16)
+		title.Size = UDim2.fromScale(1, 1 - barShare - 0.04)
 		title.BackgroundTransparency = 1
 		title.Text = string.upper(name)
 		title.TextColor3 = Color3.fromRGB(255, 90, 90)
 		title.TextStrokeTransparency = 0
 		title.Font = Enum.Font.GothamBlack
-		title.TextSize = 14
+		title.TextScaled = true
 		title.Parent = gui
 	end
 
 	local back = Instance.new("Frame")
 	back.AnchorPoint = Vector2.new(0, 1)
 	back.Position = UDim2.fromScale(0, 1)
-	back.Size = UDim2.new(1, 0, 0, wide and 14 or 15)
+	back.Size = UDim2.fromScale(1, barShare)
 	back.BackgroundColor3 = Color3.fromRGB(20, 15, 20)
 	back.BorderSizePixel = 0
 	back.Parent = gui
-	Instance.new("UICorner", back).CornerRadius = UDim.new(0, 4)
+	Instance.new("UICorner", back).CornerRadius = UDim.new(0.3, 0)
 
 	local fill = Instance.new("Frame")
 	fill.Size = UDim2.fromScale(1, 1)
 	fill.BackgroundColor3 = Color3.fromRGB(90, 220, 90)
 	fill.BorderSizePixel = 0
 	fill.Parent = back
-	Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 4)
+	Instance.new("UICorner", fill).CornerRadius = UDim.new(0.3, 0)
 
-	-- the HP number, written on top of the bar
+	-- the HP number, written on top of the bar (scales with it)
 	local text = Instance.new("TextLabel")
-	text.Size = UDim2.fromScale(1, 1)
+	text.AnchorPoint = Vector2.new(0.5, 0.5)
+	text.Position = UDim2.fromScale(0.5, 0.5)
+	text.Size = UDim2.fromScale(1, 0.9)
 	text.BackgroundTransparency = 1
 	text.TextColor3 = Color3.new(1, 1, 1)
 	text.TextStrokeTransparency = 0.3
 	text.Font = Enum.Font.GothamBold
-	text.TextSize = 11
+	text.TextScaled = true
 	text.Text = tostring(maxHp)
 	text.Parent = back
 
