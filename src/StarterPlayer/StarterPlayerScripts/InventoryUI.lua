@@ -420,21 +420,23 @@ local function styleSelection(t)
 	t.Stroke.Transparency = selectedNow and 0 or 0.45
 end
 
-local function createTile(u)
+-- A unit card: picture, name, level, stars, trait icon, team + lock badges. Used by the
+-- inventory grid and the fuse picker, so both look the same.
+local function makeUnitCard(parent, u)
 	local color = rarityByName[UnitData.UnitRarity[u.Name]].Color
 	local btn = Instance.new("TextButton")
 	btn.Text = ""
 	btn.AutoButtonColor = true
 	btn.BackgroundColor3 = darker(color, 0.55)
 	btn.ClipsDescendants = true
-	btn.Parent = grid
+	btn.Parent = parent
 	corner(btn, 8)
 	local shade = Instance.new("UIGradient")
 	shade.Color = ColorSequence.new(WHITE, Color3.fromRGB(110, 110, 120))
 	shade.Rotation = 90
 	shade.Parent = btn
 
-	-- the picture fills the top of the tile
+	-- the picture fills the top of the card
 	local pic = frame(btn, UDim2.fromScale(0, 0), UDim2.new(1, 0, 0, 66), WHITE, 1)
 	UnitModels.Portrait(u.Name).Parent = pic
 
@@ -455,12 +457,34 @@ local function createTile(u)
 	label(lockBadge, "L", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 10, BLACK, Enum.Font.GothamBlack)
 	local traitSlot = frame(btn, UDim2.new(1, -27, 0, 3), UDim2.fromOffset(24, 24), WHITE, 1)
 
-	local t = {
-		Id = u.Id, Button = btn, Color = color, Stroke = stroke(btn, color, 1, 0.45),
+	return {
+		Id = u.Id, Button = btn, Color = color, Stroke = stroke(btn, color, 1, 0.45), Picture = pic,
 		Level = levelLabel, Stars = starsLabel, Team = teamBadge, Lock = lockBadge,
 		TraitSlot = traitSlot, TraitShown = false,
 	}
-	btn.Activated:Connect(function()
+end
+
+-- Updates the parts of a card that change: level, stars, badges, trait icon
+local function updateUnitCard(card, u)
+	card.Level.Text = "Lv " .. ProgressData.LevelFromXP(u.XP)
+	card.Stars.Text = string.rep("★", u.Stars)
+	local onTeam = equipped[u.Id] == true
+	card.Team.Visible = onTeam
+	card.Lock.Visible = u.Locked
+	card.Lock.Position = UDim2.fromOffset(onTeam and 22 or 4, 4)
+	if card.TraitShown ~= (u.Trait or false) then
+		card.TraitShown = u.Trait or false
+		for _, c in ipairs(card.TraitSlot:GetChildren()) do
+			c:Destroy()
+		end
+		local icon = u.Trait and TraitData.MakeIcon(u.Trait, 24)
+		if icon then icon.Parent = card.TraitSlot end
+	end
+end
+
+local function createTile(u)
+	local t = makeUnitCard(grid, u)
+	t.Button.Activated:Connect(function()
 		if selectedId ~= t.Id then
 			selectedId = t.Id
 			confirmEvolve = false
@@ -475,20 +499,7 @@ end
 
 local function updateTile(t, u, order)
 	t.Button.LayoutOrder = order
-	t.Level.Text = "Lv " .. ProgressData.LevelFromXP(u.XP)
-	t.Stars.Text = string.rep("★", u.Stars)
-	local onTeam = equipped[u.Id] == true
-	t.Team.Visible = onTeam
-	t.Lock.Visible = u.Locked
-	t.Lock.Position = UDim2.fromOffset(onTeam and 22 or 4, 4)
-	if t.TraitShown ~= (u.Trait or false) then
-		t.TraitShown = u.Trait or false
-		for _, c in ipairs(t.TraitSlot:GetChildren()) do
-			c:Destroy()
-		end
-		local icon = u.Trait and TraitData.MakeIcon(u.Trait, 24)
-		if icon then icon.Parent = t.TraitSlot end
-	end
+	updateUnitCard(t, u)
 	styleSelection(t)
 end
 
@@ -638,8 +649,14 @@ fuseWin.ZIndex = 10
 fuseWin.Visible = false
 corner(fuseWin, 14)
 
-local fuseTitle = label(fuseWin, "", UDim2.fromOffset(0, 10), UDim2.new(1, 0, 0, 30), 22, WHITE, Enum.Font.GothamBlack)
-local fuseInfo = label(fuseWin, "", UDim2.fromOffset(10, 40), UDim2.new(1, -20, 0, 20), 15, Color3.fromRGB(110, 200, 255))
+-- the unit being fused into: its picture, name and the level it will reach
+local fusePortrait = frame(fuseWin, UDim2.fromOffset(14, 8), UDim2.fromOffset(54, 54), PANEL)
+corner(fusePortrait, 10)
+fusePortrait.ClipsDescendants = true
+local fusePortraitStroke = stroke(fusePortrait, WHITE, 2, 0)
+local fusePortraitName = nil
+local fuseTitle = label(fuseWin, "", UDim2.fromOffset(78, 10), UDim2.new(1, -140, 0, 26), 20, WHITE, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
+local fuseInfo = label(fuseWin, "", UDim2.fromOffset(78, 38), UDim2.new(1, -140, 0, 20), 14, Color3.fromRGB(110, 200, 255), Enum.Font.GothamBold, Enum.TextXAlignment.Left)
 local fuseClose = button(fuseWin, "X", UDim2.new(1, -44, 0, 10), UDim2.fromOffset(32, 32), RED, 15)
 local addCommons = button(fuseWin, "Add spare Commons", UDim2.fromOffset(14, 70), UDim2.fromOffset(170, 28), Color3.fromRGB(110, 110, 125), 13)
 local addRares = button(fuseWin, "Add spare Rares", UDim2.fromOffset(190, 70), UDim2.fromOffset(150, 28), Color3.fromRGB(60, 110, 190), 13)
@@ -657,10 +674,13 @@ fuseList.CanvasSize = UDim2.new()
 fuseList.AutomaticCanvasSize = Enum.AutomaticSize.Y
 fuseList.Parent = fuseWin
 local fuseGrid = Instance.new("UIGridLayout")
-fuseGrid.CellSize = UDim2.new(0.5, -4, 0, 32)
-fuseGrid.CellPadding = UDim2.fromOffset(8, 4)
+fuseGrid.CellSize = UDim2.fromOffset(78, 100)
+fuseGrid.CellPadding = UDim2.fromOffset(6, 6)
 fuseGrid.SortOrder = Enum.SortOrder.LayoutOrder
 fuseGrid.Parent = fuseList
+local fuseEmpty = label(fuseWin, "No units to feed in. Locked units and your team can't be fed.", UDim2.fromOffset(14, 106),
+	UDim2.new(1, -28, 0, 60), 14, DIM, Enum.Font.Gotham)
+fuseEmpty.Visible = false
 
 local fuseGo = button(fuseWin, "FUSE", UDim2.new(0.5, -110, 1, -54), UDim2.fromOffset(220, 42), Color3.fromRGB(50, 160, 90), 18)
 
@@ -681,6 +701,70 @@ local function selectionXP()
 	return total
 end
 
+-- Fuse cards, kept between refreshes like the inventory tiles (keyed by unit id)
+local fuseCards = {}
+local PICK_BLUE = Color3.fromRGB(110, 200, 255)
+
+local function stylePick(card)
+	local picked = fuseSelection[card.Id] == true
+	card.PickTint.Visible = picked
+	card.Stroke.Color = picked and PICK_BLUE or card.Color
+	card.Stroke.Thickness = picked and 3 or 1
+	card.Stroke.Transparency = picked and 0 or 0.45
+end
+
+-- Title, level preview and the FUSE button
+local function refreshFuseHeader(target)
+	local count = 0
+	for _ in pairs(fuseSelection) do count += 1 end
+	local gain = selectionXP()
+	local before = ProgressData.LevelFromXP(target.XP)
+	local after = ProgressData.LevelFromXP(math.min(target.XP + gain, ProgressData.MaxXP()))
+	fuseTitle.Text = "Fuse into " .. target.Name
+	fuseInfo.Text = gain > 0 and string.format("Lv %d  ->  Lv %d   (+%d XP from %d unit%s)", before, after, gain, count, count == 1 and "" or "s")
+		or string.format("Lv %d   -   click units below to feed them in", before)
+	fuseGo.Text = count > 0 and string.format("FUSE %d", count) or "FUSE"
+	fuseGo.BackgroundColor3 = gain > 0 and Color3.fromRGB(50, 160, 90) or GRAY
+
+	if fusePortraitName ~= target.Name then
+		fusePortraitName = target.Name
+		for _, c in ipairs(fusePortrait:GetChildren()) do
+			if c:IsA("ViewportFrame") then c:Destroy() end
+		end
+		UnitModels.Portrait(target.Name).Parent = fusePortrait
+	end
+	local color = rarityByName[UnitData.UnitRarity[target.Name]].Color
+	fusePortrait.BackgroundColor3 = darker(color, 0.55)
+	fusePortraitStroke.Color = color
+end
+
+local function createFuseCard(u)
+	local card = makeUnitCard(fuseList, u)
+	-- picked: a blue tint over the picture with a check mark
+	local tint = frame(card.Button, UDim2.fromScale(0, 0), UDim2.new(1, 0, 0, 66), PICK_BLUE, 0.55)
+	tint.Visible = false
+	local check = frame(tint, UDim2.fromScale(0.5, 0.5), UDim2.fromOffset(28, 28), PICK_BLUE)
+	check.AnchorPoint = Vector2.new(0.5, 0.5)
+	corner(check, "round")
+	stroke(check, WHITE, 2)
+	label(check, "✓", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 18, WHITE, Enum.Font.GothamBlack)
+	card.PickTint = tint
+	-- how much XP this unit gives, just above the name band
+	local xpTag = frame(card.Button, UDim2.new(0, 3, 1, -50), UDim2.fromOffset(52, 14), BLACK, 0.3)
+	corner(xpTag, "round")
+	label(xpTag, "+" .. ProgressData.FodderXP[UnitData.UnitRarity[u.Name]] .. " XP", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 9, PICK_BLUE, Enum.Font.GothamBlack)
+
+	card.Button.Activated:Connect(function()
+		local cu = byId[card.Id]
+		local target = fuseTarget and byId[fuseTarget]
+		if not cu or not target or not canFeed(cu) then return end
+		fuseSelection[card.Id] = not fuseSelection[card.Id] or nil
+		stylePick(card)
+		refreshFuseHeader(target)
+	end)
+	return card
+end
+
 local function refreshFuse()
 	local target = fuseTarget and byId[fuseTarget]
 	if not target then
@@ -694,60 +778,33 @@ local function refreshFuse()
 		if not u or not canFeed(u) then fuseSelection[id] = nil end
 	end
 
-	local count = 0
-	for _ in pairs(fuseSelection) do count += 1 end
-	local gain = selectionXP()
-	local before = ProgressData.LevelFromXP(target.XP)
-	local after = ProgressData.LevelFromXP(math.min(target.XP + gain, ProgressData.MaxXP()))
-	fuseTitle.Text = "Fuse into " .. target.Name
-	fuseInfo.Text = gain > 0 and string.format("Lv %d  ->  Lv %d   (+%d XP from %d unit%s)", before, after, gain, count, count == 1 and "" or "s")
-		or string.format("Lv %d   -   pick units below to feed in", before)
-	fuseGo.Text = count > 0 and string.format("FUSE %d", count) or "FUSE"
-	fuseGo.BackgroundColor3 = gain > 0 and Color3.fromRGB(50, 160, 90) or GRAY
-
-	for _, c in ipairs(fuseList:GetChildren()) do
-		if c:IsA("GuiObject") then c:Destroy() end
-	end
+	-- weakest first: they're the usual food. Units that can't be fed stay hidden.
 	local order = 0
-	for i = #units, 1, -1 do -- weakest first: they're the usual food
+	for i = #units, 1, -1 do
 		local u = units[i]
+		local card = fuseCards[u.Id]
 		if canFeed(u) then
 			order += 1
-			local picked = fuseSelection[u.Id] == true
-			local rarityName = UnitData.UnitRarity[u.Name]
-			local color = rarityByName[rarityName].Color
-			local row = Instance.new("TextButton")
-			row.LayoutOrder = order
-			row.Text = ""
-			row.AutoButtonColor = true
-			row.BackgroundColor3 = darker(color, picked and 0.45 or 0.78)
-			row.Parent = fuseList
-			corner(row, 6)
-			if picked then stroke(row, Color3.fromRGB(110, 200, 255), 2) end
-
-			local box = frame(row, UDim2.fromOffset(8, 9), UDim2.fromOffset(14, 14), picked and Color3.fromRGB(110, 200, 255) or PANEL)
-			corner(box, 3)
-			stroke(box, WHITE, 1, 0.5)
-			local extra = ""
-			if u.Trait then extra ..= " [" .. u.Trait .. "]" end
-			if u.Stars > 0 then extra ..= " " .. string.rep("★", u.Stars) end
-			local n = label(row, string.format("%s  Lv %d%s", u.Name, ProgressData.LevelFromXP(u.XP), extra),
-				UDim2.fromOffset(30, 0), UDim2.new(1, -96, 1, 0), 12, color, Enum.Font.GothamBold, Enum.TextXAlignment.Left)
-			n.TextTruncate = Enum.TextTruncate.AtEnd
-			label(row, "+" .. ProgressData.FodderXP[rarityName] .. " XP", UDim2.new(1, -66, 0, 0), UDim2.new(0, 60, 1, 0), 12,
-				Color3.fromRGB(110, 200, 255), Enum.Font.GothamBold, Enum.TextXAlignment.Right)
-
-			row.Activated:Connect(function()
-				fuseSelection[u.Id] = not picked or nil
-				refreshFuse()
-			end)
+			if not card then
+				card = createFuseCard(u)
+				fuseCards[u.Id] = card
+			end
+			card.Button.Visible = true
+			card.Button.LayoutOrder = order
+			updateUnitCard(card, u)
+			stylePick(card)
+		elseif card then
+			card.Button.Visible = false
 		end
 	end
-	if order == 0 then
-		local holder = frame(fuseList, UDim2.new(), UDim2.new(), WHITE, 1)
-		holder.LayoutOrder = 1
-		label(holder, "No units to feed in.", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 14, DIM, Enum.Font.Gotham)
+	for id, card in pairs(fuseCards) do
+		if not byId[id] then
+			card.Button:Destroy()
+			fuseCards[id] = nil
+		end
 	end
+	fuseEmpty.Visible = order == 0
+	refreshFuseHeader(target)
 end
 
 local function addSpares(rarityName)
