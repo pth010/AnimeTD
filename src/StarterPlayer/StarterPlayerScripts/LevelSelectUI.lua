@@ -1,7 +1,8 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: LevelSelectUI
--- (replaces the earlier version: level rewards show the gold, gem and crystal icons from CurrencyIcons)
+-- (replaces the earlier version: the window still opens if the CurrencyIcons module is
+--  missing or broken, just without the reward icons, and warns in Output)
 -- The level-select window that pops up while you stand on a team pad in the lobby.
 --   * The first player on the pad (the host) picks the level; locked levels need the one
 --     before them beaten first. Picking a level starts the countdown, START skips most of it.
@@ -11,7 +12,22 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LevelData = require(ReplicatedStorage:WaitForChild("LevelData"))
-local CurrencyIcons = require(ReplicatedStorage:WaitForChild("CurrencyIcons"))
+-- The reward icons are a nice-to-have: if CurrencyIcons is missing or broken, the level
+-- select must still open (you can't queue without it), so load it carefully.
+local CurrencyIcons = nil
+do
+	local module = ReplicatedStorage:WaitForChild("CurrencyIcons", 5)
+	local ok, result = false, nil
+	if module then
+		ok, result = pcall(require, module)
+	end
+	if ok and type(result) == "table" and type(result.Make) == "function" then
+		CurrencyIcons = result
+	else
+		warn("[LevelSelectUI] CurrencyIcons is missing or not the full script, so level rewards show without icons."
+			.. " Paste the CurrencyIcons code into ReplicatedStorage.CurrencyIcons.")
+	end
+end
 local levelRemote = ReplicatedStorage:WaitForChild("LevelSelectRemote")
 local player = Players.LocalPlayer
 
@@ -182,9 +198,13 @@ for i, level in ipairs(LevelData.Levels) do
 	}) do
 		local y = 4 + (i - 1) * 17
 		label(card, "+" .. reward[2] .. reward[3], UDim2.new(1, -150, 0, y), UDim2.fromOffset(116, 18), 14, reward[4], Enum.Font.GothamBlack, Enum.TextXAlignment.Right)
-		local icon = CurrencyIcons.Make(reward[1], 17)
-		icon.Position = UDim2.new(1, -31, 0, y)
-		icon.Parent = card
+		local ok, icon = pcall(function()
+			return CurrencyIcons and CurrencyIcons.Make(reward[1], 17)
+		end)
+		if ok and icon then
+			icon.Position = UDim2.new(1, -31, 0, y)
+			icon.Parent = card
+		end
 	end
 	local tag = label(card, "", UDim2.new(1, -170, 0, 58), UDim2.fromOffset(156, 18), 12, SUBTLE, Enum.Font.GothamBlack, Enum.TextXAlignment.Right)
 
