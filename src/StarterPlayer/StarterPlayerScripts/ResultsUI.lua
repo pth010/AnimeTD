@@ -1,7 +1,8 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: ResultsUI
--- (replaces the earlier version: rewards show the gold, gem and crystal icons from CurrencyIcons)
+-- (replaces the earlier version: the screen still shows if the CurrencyIcons module is missing
+--  or broken (just without icons), and it prints to Output when the results arrive)
 -- The end-of-match screen (victory or defeat). Shows the waves reached, the rewards you
 -- earned and a damage summary for every player in the match, with two buttons:
 --   PLAY AGAIN       - the team replays once everyone left on the screen has picked it
@@ -13,7 +14,21 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local resultsEvent = ReplicatedStorage:WaitForChild("ResultsEvent")
-local CurrencyIcons = require(ReplicatedStorage:WaitForChild("CurrencyIcons"))
+-- The reward icons are a nice-to-have: the results screen must show even if CurrencyIcons is
+-- missing or broken, so load it carefully
+local CurrencyIcons = nil
+do
+	local module = ReplicatedStorage:WaitForChild("CurrencyIcons", 5)
+	local ok, result = false, nil
+	if module then
+		ok, result = pcall(require, module)
+	end
+	if ok and type(result) == "table" and type(result.Make) == "function" then
+		CurrencyIcons = result
+	else
+		warn("[ResultsUI] CurrencyIcons is missing or broken, so rewards show without icons.")
+	end
+end
 local player = Players.LocalPlayer
 
 local WIDTH, HEIGHT = 580, 500
@@ -118,9 +133,11 @@ local function rewardCell(index, kind, color)
 	layout.Padding = UDim.new(0, 6)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = cell
-	local icon = CurrencyIcons.Make(kind, 28)
-	icon.LayoutOrder = 1
-	icon.Parent = cell
+	local icon = CurrencyIcons and CurrencyIcons.Make(kind, 28)
+	if icon then
+		icon.LayoutOrder = 1
+		icon.Parent = cell
+	end
 	local amount = label(cell, "", UDim2.new(), UDim2.fromOffset(0, 28), 20, color, Enum.Font.GothamBlack)
 	amount.AutomaticSize = Enum.AutomaticSize.X
 	amount.LayoutOrder = 2
@@ -274,8 +291,14 @@ resultsEvent.OnClientEvent:Connect(function(data)
 	if type(data) ~= "table" then return end
 	if data.Hide then
 		hide()
-	else
-		show(data)
+		return
+	end
+	print("[ResultsUI] Results arrived:", data.Victory and "victory" or "defeat")
+	local ok, err = pcall(show, data)
+	if not ok then
+		-- something in the details broke: still show the screen so the buttons work
+		warn("[ResultsUI] Couldn't fill in the results screen:", err)
+		gui.Enabled = true
 	end
 end)
 

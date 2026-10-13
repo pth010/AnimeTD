@@ -1,10 +1,11 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: works in both places. In the lobby the pads send each team
---  to its own match server (see MatchTeleport). In the match place it plays the level the
---  lobby picked, then sends everyone back. In Studio, or while PlaceConfig.MatchPlaceId is
---  0, matches still run in the lobby's sky arenas like before.)
+-- (replaces the earlier version: a problem giving out win rewards can no longer stop the
+--  victory screen, and Output shows when the results screen is sent. Works in both places:
+--  in the lobby the pads send each team to its own match server (see MatchTeleport), and in
+--  the match place it plays the level the lobby picked, then sends everyone back. In Studio,
+--  or while PlaceConfig.MatchPlaceId is 0, matches run in the lobby's sky arenas.)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -1030,12 +1031,19 @@ local function playMatch(arena, participants)
 
 	arena.State = "Over"
 	for p in pairs(arena.Players) do
-		PlayerData.AddGold(p, level.WinGold)
-		PlayerData.AddGems(p, level.WinGems)
-		PlayerData.AddShards(p, level.WinShards or 0)
-		PlayerData.MarkCleared(p, level.Id) -- unlocks the next level
+		-- a problem paying one player must never stop the victory screen
+		local ok, err = pcall(function()
+			PlayerData.AddGold(p, level.WinGold)
+			PlayerData.AddGems(p, level.WinGems)
+			PlayerData.AddShards(p, level.WinShards or 0)
+			PlayerData.MarkCleared(p, level.Id) -- unlocks the next level
+		end)
+		if not ok then
+			warn("[GameService] Couldn't give " .. p.Name .. " the win rewards:", err)
+		end
 		statsFor(arena, p).Gems += level.WinGems
 	end
+	print("[GameService] Arena " .. arena.Id .. " won " .. level.Name .. ", showing the victory screen")
 	return true
 end
 
@@ -1058,7 +1066,9 @@ local function showResults(arena, victory)
 	local teamCount = 0
 	for _ in pairs(arena.Players) do teamCount += 1 end
 
+	local sent = 0
 	for p in pairs(arena.Players) do
+		sent += 1
 		local mine = statsFor(arena, p)
 		resultsEvent:FireClient(p, {
 			Victory = victory,
@@ -1074,6 +1084,7 @@ local function showResults(arena, victory)
 			Time = RESULTS_TIME,
 		})
 	end
+	print("[GameService] Sent the " .. (victory and "victory" or "defeat") .. " screen to " .. sent .. " player(s)")
 
 	local deadline = os.clock() + RESULTS_TIME
 	while os.clock() < deadline and participantsLeft(arena) do
@@ -1123,7 +1134,10 @@ local function runMatch(arena, participants, level)
 	arena.Level = level
 	while #participants > 0 do
 		local victory = playMatch(arena, participants)
-		if victory == nil then break end -- everyone left
+		if victory == nil then -- everyone left
+			print("[GameService] Arena " .. arena.Id .. ": nobody is left in the match, so no results screen")
+			break
+		end
 		participants = showResults(arena, victory)
 	end
 	endMatch(arena)
