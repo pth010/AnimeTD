@@ -340,7 +340,13 @@ local function refreshDetail()
 	dName.Text = u.Name
 	dRarity.Text = rarityName
 	dRarity.TextColor3 = rarity.Color
-	dLevel.Text = string.format("Lv %d   %s", level, ProgressData.StarText(u.Stars))
+	-- the level's bonus: +10% base damage (or income for cash units) per level above 1
+	local bonus = math.floor(ProgressData.PerLevel * (level - 1) * 100 + 0.5)
+	dLevel.Text = string.format("Lv %d%s   %s", level, level >= ProgressData.MaxLevel and " MAX" or "",
+		ProgressData.StarText(u.Stars))
+	if bonus > 0 then
+		dLevel.Text ..= string.format("   +%d%% %s", bonus, UnitData.IsFarm(u.Name) and "cash" or "DMG")
+	end
 	dLevel.TextColor3 = ProgressData.StarColor
 	dXPFill.Size = UDim2.fromScale(need > 0 and into / need or 1, 1)
 	dXPFill.BackgroundColor3 = need > 0 and Color3.fromRGB(110, 200, 255) or ProgressData.StarColor
@@ -723,6 +729,12 @@ local function refreshFuseHeader(target)
 	fuseTitle.Text = "Fuse into " .. target.Name
 	fuseInfo.Text = gain > 0 and string.format("Lv %d  ->  Lv %d   (+%d XP from %d unit%s)", before, after, gain, count, count == 1 and "" or "s")
 		or string.format("Lv %d   -   click units below to feed them in", before)
+	-- units cap at max level, so XP past it is lost
+	local wasted = target.XP + gain - ProgressData.MaxXP()
+	if gain > 0 and wasted > 0 then
+		fuseInfo.Text ..= string.format("   ·   %d XP wasted past max level", wasted)
+	end
+	fuseInfo.TextColor3 = (gain > 0 and wasted > 0) and LOCK_GOLD or Color3.fromRGB(110, 200, 255)
 	fuseGo.Text = count > 0 and string.format("FUSE %d", count) or "FUSE"
 	fuseGo.BackgroundColor3 = gain > 0 and Color3.fromRGB(50, 160, 90) or GRAY
 

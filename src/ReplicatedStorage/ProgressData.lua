@@ -1,17 +1,24 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: ProgressData
+-- (replaces the earlier version: units cap at level 5, each level adds +10% base damage,
+--  and every level needs more XP than the last, see LevelXP)
 -- Unit levels (from fusing) and evolution stars. Both are done in the Inventory.
 --
--- FUSE: feed other units into a unit to give it XP. Each copy fed gives FodderXP for its
---   rarity. Every level gives the unit +2% damage (cash units: +2% income instead).
+-- FUSE: feed other units into a unit to give it XP. Each unit fed gives FodderXP for its
+--   rarity. Every level above 1 adds +10% of the unit's base damage (Lv 5 = +40%).
+--   Cash units get +10% income per level instead.
 -- EVOLVE: spend extra copies of the SAME unit (plus some Gold) to give it a star.
 --   Stars stack on top of levels. You always keep one copy of the unit.
 
 local ProgressData = {}
 
-ProgressData.MaxLevel = 25
-ProgressData.PerLevel = 0.02 -- +2% damage (or income) per level above 1
+ProgressData.MaxLevel = 5
+ProgressData.PerLevel = 0.10 -- +10% base damage (or income) per level above 1
+
+-- XP needed for each level-up: LevelXP[1] takes a unit from Lv 1 to Lv 2, and so on.
+-- Each step costs more than the last. Lv 1 to Lv 5 is 2,400 XP in total.
+ProgressData.LevelXP = { 200, 400, 700, 1100 }
 
 -- XP one copy gives when it is fused into another unit
 ProgressData.FodderXP = {
@@ -31,9 +38,9 @@ ProgressData.Evolutions = {
 ProgressData.MaxStars = #ProgressData.Evolutions
 ProgressData.StarColor = Color3.fromRGB(255, 215, 80)
 
--- XP needed to go from `level` to `level + 1`
+-- XP needed to go from `level` to `level + 1` (0 at max level)
 function ProgressData.XPToNext(level)
-	return 100 * level
+	return ProgressData.LevelXP[level] or 0
 end
 
 -- Total XP needed to reach max level
