@@ -576,32 +576,93 @@ local orbRingStroke = stroke(orbRing, WHITE, 2, 0.3)
 
 local cardsArea = frame(stage, UDim2.fromOffset(0, 76), UDim2.new(1, 0, 0, 390), WHITE, 1)
 
-local doneRow = frame(stage, UDim2.new(0.5, 0, 1, -64), UDim2.fromOffset(420, 52), WHITE, 1)
-doneRow.AnchorPoint = Vector2.new(0.5, 0)
-doneRow.Visible = false
-local function revealButton(text, x, width, primary)
-	local b = Instance.new("TextButton")
-	b.Position = UDim2.fromOffset(x, 0)
-	b.Size = UDim2.fromOffset(width, 52)
-	b.Text = text
-	b.Font = Enum.Font.GothamBlack
-	b.TextSize = 17
-	b.TextColor3 = WHITE
-	b.BackgroundColor3 = primary and WHITE or GLASS
-	b.Parent = doneRow
-	corner(b, 12)
-	stroke(b, WHITE, 1, primary and 0.5 or 0.8)
-	if primary then
-		gradient(b, featuredColor:Lerp(GOLD, 0.25), darker(featuredColor, 0.35), 25)
-	end
-	return b
-end
-local againBtn = revealButton("Summon again", 0, 205, true)
-local doneBtn = revealButton("Done", 215, 205, false)
-
 local revealing = false
 local skipRequested = false
-local lastCount = 1
+local lastCount = 1 -- 1 or 10: what Summon again repeats
+
+-- The two buttons under the cards. Both pair a solid fill with a strongly contrasting text
+-- color: dark text on bright gold, white text on near-black with a white outline.
+local AGAIN_FILL = Color3.fromRGB(255, 200, 70)
+local AGAIN_HOVER = Color3.fromRGB(255, 218, 120)
+local AGAIN_TEXT = Color3.fromRGB(34, 22, 6)
+local DONE_FILL = Color3.fromRGB(12, 11, 20)
+local DONE_HOVER = Color3.fromRGB(38, 36, 56)
+local OFF_FILL = Color3.fromRGB(64, 64, 78)
+local OFF_TEXT = Color3.fromRGB(205, 205, 218)
+
+local doneRow = frame(stage, UDim2.new(0.5, 0, 1, -70), UDim2.fromOffset(456, 60), WHITE, 1)
+doneRow.AnchorPoint = Vector2.new(0.5, 0)
+doneRow.Visible = false
+
+local function revealButton(x, fill, textColor, outline)
+	local b = Instance.new("TextButton")
+	b.Position = UDim2.fromOffset(x, 0)
+	b.Size = UDim2.fromOffset(220, 60)
+	b.Text = ""
+	b.AutoButtonColor = false
+	b.BackgroundColor3 = fill
+	b.Parent = doneRow
+	corner(b, 14)
+	local s = stroke(b, outline, 2, 0)
+	local scale = Instance.new("UIScale")
+	scale.Parent = b
+	local main = label(b, "", UDim2.fromOffset(0, 10), UDim2.new(1, 0, 0, 22), 19, textColor, Enum.Font.GothamBlack)
+	local sub = label(b, "", UDim2.fromOffset(0, 33), UDim2.new(1, 0, 0, 16), 13, textColor, Enum.Font.GothamBold)
+	b.MouseButton1Down:Connect(function()
+		TweenService:Create(scale, FAST, { Scale = 0.95 }):Play()
+	end)
+	b.MouseButton1Up:Connect(function()
+		TweenService:Create(scale, BOUNCY, { Scale = 1 }):Play()
+	end)
+	b.MouseLeave:Connect(function()
+		TweenService:Create(scale, FAST, { Scale = 1 }):Play()
+	end)
+	return { Button = b, Stroke = s, Main = main, Sub = sub }
+end
+
+local again = revealButton(0, AGAIN_FILL, AGAIN_TEXT, Color3.fromRGB(255, 240, 200))
+local done = revealButton(236, DONE_FILL, WHITE, WHITE)
+local againBtn, doneBtn = again.Button, done.Button
+done.Main.Text = "DONE"
+done.Main.Position = UDim2.fromOffset(0, 19)
+done.Stroke.Transparency = 0.15
+
+local againAffordable = true
+-- Shows the cost of repeating the last summon, or a grayed-out state when you can't afford it
+local function refreshAgain()
+	local cost = lastCount == 10 and TEN_COST or SINGLE_COST
+	againAffordable = (player:GetAttribute("Gems") or 0) >= cost
+	again.Main.Text = lastCount == 10 and "SUMMON x10" or "SUMMON x1"
+	if againAffordable then
+		again.Sub.Text = commas(cost) .. " gems"
+		againBtn.BackgroundColor3 = AGAIN_FILL
+		again.Main.TextColor3 = AGAIN_TEXT
+		again.Sub.TextColor3 = AGAIN_TEXT
+		again.Stroke.Transparency = 0.2
+	else
+		again.Sub.Text = "Not enough gems"
+		againBtn.BackgroundColor3 = OFF_FILL
+		again.Main.TextColor3 = OFF_TEXT
+		again.Sub.TextColor3 = OFF_TEXT
+		again.Stroke.Transparency = 0.8
+	end
+end
+
+againBtn.MouseEnter:Connect(function()
+	if againAffordable then
+		TweenService:Create(againBtn, FAST, { BackgroundColor3 = AGAIN_HOVER }):Play()
+	end
+end)
+againBtn.MouseLeave:Connect(function()
+	TweenService:Create(againBtn, FAST, { BackgroundColor3 = againAffordable and AGAIN_FILL or OFF_FILL }):Play()
+end)
+doneBtn.MouseEnter:Connect(function()
+	TweenService:Create(doneBtn, FAST, { BackgroundColor3 = DONE_HOVER }):Play()
+end)
+doneBtn.MouseLeave:Connect(function()
+	TweenService:Create(doneBtn, FAST, { BackgroundColor3 = DONE_FILL }):Play()
+end)
+
 
 local function clearCards()
 	for _, c in ipairs(cardsArea:GetChildren()) do
@@ -826,7 +887,7 @@ local function playReveal(results)
 		c.Flip(true) -- anything left after a skip
 	end
 
-	againBtn.Text = lastCount == 10 and "Summon x10 again" or "Summon x1 again"
+	refreshAgain()
 	doneRow.Visible = true
 	revealing = false
 end
@@ -872,11 +933,12 @@ singleBtn.Activated:Connect(function() doSummon(1) end)
 tenBtn.Activated:Connect(function() doSummon(10) end)
 againBtn.Activated:Connect(function()
 	if revealing or busy then return end
-	if (player:GetAttribute("Gems") or 0) < (lastCount == 10 and TEN_COST or SINGLE_COST) then
-		againBtn.Text = "Not enough gems"
-		return
-	end
+	refreshAgain()
+	if not againAffordable then return end
 	doSummon(lastCount)
+end)
+player:GetAttributeChangedSignal("Gems"):Connect(function()
+	if doneRow.Visible then refreshAgain() end
 end)
 
 -- ===== Ambient motion (only while something is on screen) =====
