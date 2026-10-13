@@ -1,8 +1,8 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: LayoutUI
--- (replaces the earlier version: the Settings button is a slim strip right under the
---  Inventory button, the same width and half as tall)
+-- (replaces the earlier version: the Settings button sits right under the Inventory button,
+--  half its width and the same height)
 -- The Settings popup (Settings button under the Inventory button, always on screen):
 --   * Screen Layout: move and resize the team bar, the Inventory button and the
 --     Gems / Gold / Shards counter with sliders
@@ -152,9 +152,18 @@ gui.DisplayOrder = 5
 gui.Parent = playerGui
 
 -- Right under the Inventory button (InventoryUI: 130x40 at the left edge, centered on the
--- middle of the screen): the same width, half as tall, with a small gap
-local gear = button(gui, "Settings", UDim2.new(0, 10, 0.5, 26), UDim2.fromOffset(130, 20), Color3.fromRGB(70, 110, 220), 12)
+-- middle of the screen): half as wide, the same height, with a small gap
+local gear = button(gui, "Settings", UDim2.new(0, 10, 0.5, 26), UDim2.fromOffset(65, 40), Color3.fromRGB(70, 110, 220), 13)
 gear.Name = "SettingsButton"
+-- shrink the text a little if it doesn't fit the narrow button
+gear.TextScaled = true
+local gearText = Instance.new("UITextSizeConstraint")
+gearText.MaxTextSize = 13
+gearText.Parent = gear
+local gearPad = Instance.new("UIPadding")
+gearPad.PaddingLeft = UDim.new(0, 4)
+gearPad.PaddingRight = UDim.new(0, 4)
+gearPad.Parent = gear
 print("[LayoutUI] Settings button ready (under the Inventory button)")
 
 local PW, PH = 360, 330
