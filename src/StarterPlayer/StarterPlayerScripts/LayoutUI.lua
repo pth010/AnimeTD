@@ -1,9 +1,9 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: LayoutUI
--- (replaces the earlier version: the gear icon didn't show up, so Settings is now a text
---  button like Inventory, in the top right corner)
--- The Settings popup (Settings button in the top right, always on screen):
+-- (replaces the earlier version: the Settings button is a slim strip right under the
+--  Inventory button, the same width and half as tall)
+-- The Settings popup (Settings button under the Inventory button, always on screen):
 --   * Screen Layout: move and resize the team bar, the Inventory button and the
 --     Gems / Gold / Shards counter with sliders
 --   * Trait icons over units, enemy health bars, HP numbers on health bars: on / off
@@ -151,11 +151,11 @@ gui.ResetOnSpawn = false
 gui.DisplayOrder = 5
 gui.Parent = playerGui
 
--- Top right, just left of the match speed buttons (SpeedUI, 204 wide) so they never overlap
-local gear = button(gui, "Settings", UDim2.new(1, -224, 0, 10), UDim2.fromOffset(104, 34), Color3.fromRGB(70, 110, 220), 15)
-gear.AnchorPoint = Vector2.new(1, 0)
+-- Right under the Inventory button (InventoryUI: 130x40 at the left edge, centered on the
+-- middle of the screen): the same width, half as tall, with a small gap
+local gear = button(gui, "Settings", UDim2.new(0, 10, 0.5, 26), UDim2.fromOffset(130, 20), Color3.fromRGB(70, 110, 220), 12)
 gear.Name = "SettingsButton"
-print("[LayoutUI] Settings button ready (top right of the screen)")
+print("[LayoutUI] Settings button ready (under the Inventory button)")
 
 local PW, PH = 360, 330
 local panel = Instance.new("Frame")
