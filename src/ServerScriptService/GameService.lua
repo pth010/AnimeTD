@@ -1,7 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: placed units show their trait's icon above their name)
+-- (replaces the earlier version: unit name tags use a rounded cartoon font with a smooth
+--  outline, and no longer show the level)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -178,21 +179,29 @@ local function drawBeam(arena, a, b, color)
 	Debris:AddItem(beam, 0.1)
 end
 
+-- Floating text over a unit (its name, or a "+$250" cash pop). A rounded cartoon font with
+-- a smooth, thick outline (a UIStroke, which stays crisp where the old text stroke looked jagged).
 local function makeNameTag(parent, text, offsetY)
 	local gui = Instance.new("BillboardGui")
-	gui.Size = UDim2.fromOffset(110, 20)
+	gui.Size = UDim2.fromOffset(170, 28)
 	gui.StudsOffset = Vector3.new(0, offsetY, 0)
 	gui.AlwaysOnTop = true
+	gui.LightInfluence = 0
 	gui.Parent = parent
 	local label = Instance.new("TextLabel")
 	label.Size = UDim2.fromScale(1, 1)
 	label.BackgroundTransparency = 1
 	label.TextColor3 = Color3.new(1, 1, 1)
-	label.TextStrokeTransparency = 0
-	label.Font = Enum.Font.GothamBold
-	label.TextSize = 14
+	label.TextStrokeTransparency = 1 -- the UIStroke below draws the outline instead
+	label.Font = Enum.Font.FredokaOne
+	label.TextSize = 19
 	label.Text = text
 	label.Parent = gui
+	local outline = Instance.new("UIStroke")
+	outline.Color = Color3.fromRGB(25, 20, 40)
+	outline.Thickness = 2.5
+	outline.LineJoinMode = Enum.LineJoinMode.Round
+	outline.Parent = label
 	return label
 end
 
@@ -506,7 +515,8 @@ local function refreshUnit(u)
 		part:SetAttribute("NextIncome", farmIncome(u, u.Level + 1))
 	end
 	-- the trait shows as an icon above this tag (see makeTraitBadge), so it isn't in the text
-	u.Label.Text = string.format("%s%s Lv%d%s", u.Stars > 0 and (string.rep("★", u.Stars) .. " ") or "", part.Name, u.Level,
+	-- just the name (the level is in the upgrade panel when you click the unit)
+	u.Label.Text = string.format("%s%s%s", u.Stars > 0 and (string.rep("★", u.Stars) .. " ") or "", part.Name,
 		u.HighGround and " (High)" or "")
 end
 
@@ -673,7 +683,7 @@ placeRemote.OnServerInvoke = function(player, unitName, position)
 	part.Position = spot + Vector3.new(0, 2.8, 0)
 	local label = makeNameTag(part, unitName, 3.6)
 	if trait then
-		makeTraitBadge(part, trait, 4.9)
+		makeTraitBadge(part, trait, 5.2)
 	end
 
 	-- Start out facing the nearest bit of path
