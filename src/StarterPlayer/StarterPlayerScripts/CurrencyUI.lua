@@ -1,7 +1,7 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: CurrencyUI
--- (replaces the earlier version: adds a Trait Shards row to the counter)
+-- (replaces the earlier version: the counter uses the gem, coin and crystal icons from CurrencyIcons)
 -- Shows your Gems, Gold and Trait Shards on the left side of the screen while in the lobby, and a reward
 -- popup when you earn something (e.g. "VICTORY! +375 Gold +75 Gems" after winning a match).
 
@@ -9,6 +9,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
+local CurrencyIcons = require(ReplicatedStorage:WaitForChild("CurrencyIcons"))
 local rewardEvent = ReplicatedStorage:WaitForChild("RewardEvent")
 local player = Players.LocalPlayer
 
@@ -32,17 +33,10 @@ counter.BackgroundTransparency = 0.1
 counter.Parent = gui
 Instance.new("UICorner", counter).CornerRadius = UDim.new(0, 10)
 
-local function counterRow(y, icon, color)
-	local dot = Instance.new("TextLabel")
-	dot.Position = UDim2.fromOffset(8, y)
-	dot.Size = UDim2.fromOffset(30, 30)
-	dot.BackgroundColor3 = color
-	dot.Text = icon
-	dot.TextColor3 = PANEL
-	dot.Font = Enum.Font.GothamBlack
-	dot.TextSize = 16
-	dot.Parent = counter
-	Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+local function counterRow(y, kind, color)
+	local icon = CurrencyIcons.Make(kind, 30)
+	icon.Position = UDim2.fromOffset(8, y)
+	icon.Parent = counter
 
 	local amount = Instance.new("TextLabel")
 	amount.Position = UDim2.fromOffset(44, y)
@@ -57,9 +51,9 @@ local function counterRow(y, icon, color)
 	return amount
 end
 
-local gemsLabel = counterRow(10, "G", GEM_COLOR)
-local goldLabel = counterRow(44, "$", GOLD_COLOR)
-local shardsLabel = counterRow(78, "T", SHARD_COLOR) -- Trait Shards (spent in the Traits Cave)
+local gemsLabel = counterRow(10, "Gems", GEM_COLOR)
+local goldLabel = counterRow(44, "Gold", GOLD_COLOR)
+local shardsLabel = counterRow(78, "Shards", SHARD_COLOR) -- Trait Shards (spent in the Traits Cave)
 
 -- 1234567 -> "1,234,567"
 local function commas(n)

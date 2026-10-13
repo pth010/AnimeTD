@@ -1,8 +1,9 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: TraitCaveUI
--- (replaces the earlier version: units show a picture of themselves and traits show their
---  icons, in the list, the summoning circle and the odds)
+-- (replaces the earlier version: the Trait Shards pill uses the crystal icon from CurrencyIcons)
+-- Units show a picture of themselves and traits show their icons, in the list, the
+-- summoning circle and the odds.
 -- The Traits Cave window: pick one of your units, then summon a trait onto it for Trait
 -- Shards (won from levels).
 -- The unit keeps that trait until you summon on it again (the new trait replaces the old).
@@ -16,6 +17,7 @@ local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
 local ProgressData = require(ReplicatedStorage:WaitForChild("ProgressData"))
 local UnitModels = require(ReplicatedStorage:WaitForChild("UnitModels"))
+local CurrencyIcons = require(ReplicatedStorage:WaitForChild("CurrencyIcons"))
 local inventoryRemote = ReplicatedStorage:WaitForChild("InventoryRemote")
 local player = Players.LocalPlayer
 
@@ -211,8 +213,9 @@ shrine.ClipsDescendants = true
 local shardPill = frame(shrine, UDim2.new(1, -150, 0, 12), UDim2.fromOffset(138, 26), darker(SHARD, 0.72))
 corner(shardPill, "round")
 stroke(shardPill, SHARD, 1.5, 0.3)
-local shardIcon = diamond(shardPill, 10, SHARD)
-shardIcon.Position = UDim2.fromOffset(15, 13)
+local shardIcon = CurrencyIcons.Make("Shards", 22)
+shardIcon.Position = UDim2.fromOffset(4, 2)
+shardIcon.Parent = shardPill
 local shardLabel = label(shardPill, "", UDim2.fromOffset(26, 0), UDim2.new(1, -32, 1, 0), 12, SHARD, Enum.Font.GothamBlack)
 shardLabel.TextXAlignment = Enum.TextXAlignment.Left
 

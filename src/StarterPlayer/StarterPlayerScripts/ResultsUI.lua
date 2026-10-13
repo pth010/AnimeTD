@@ -1,7 +1,7 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: ResultsUI
--- (replaces the earlier version: also shows the Trait Shards you won)
+-- (replaces the earlier version: rewards show the gold, gem and crystal icons from CurrencyIcons)
 -- The end-of-match screen (victory or defeat). Shows the waves reached, the rewards you
 -- earned and a damage summary for every player in the match, with two buttons:
 --   PLAY AGAIN       - the team replays once everyone left on the screen has picked it
@@ -13,6 +13,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local resultsEvent = ReplicatedStorage:WaitForChild("ResultsEvent")
+local CurrencyIcons = require(ReplicatedStorage:WaitForChild("CurrencyIcons"))
 local player = Players.LocalPlayer
 
 local WIDTH, HEIGHT = 580, 500
@@ -103,9 +104,31 @@ rewards.Size = UDim2.new(1, -40, 0, 44)
 rewards.BackgroundColor3 = PANEL_LIGHT
 rewards.Parent = panel
 corner(rewards, 10)
-local goldText = label(rewards, "", UDim2.fromScale(0, 0), UDim2.fromScale(1 / 3, 1), 20, GOLD, Enum.Font.GothamBlack)
-local gemsText = label(rewards, "", UDim2.fromScale(1 / 3, 0), UDim2.fromScale(1 / 3, 1), 20, GEM, Enum.Font.GothamBlack)
-local shardsText = label(rewards, "", UDim2.fromScale(2 / 3, 0), UDim2.fromScale(1 / 3, 1), 20, SHARD, Enum.Font.GothamBlack)
+-- One reward per third of the row: the currency's icon, then the amount, centered together
+local function rewardCell(index, kind, color)
+	local cell = Instance.new("Frame")
+	cell.Position = UDim2.fromScale((index - 1) / 3, 0)
+	cell.Size = UDim2.fromScale(1 / 3, 1)
+	cell.BackgroundTransparency = 1
+	cell.Parent = rewards
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.Padding = UDim.new(0, 6)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = cell
+	local icon = CurrencyIcons.Make(kind, 28)
+	icon.LayoutOrder = 1
+	icon.Parent = cell
+	local amount = label(cell, "", UDim2.new(), UDim2.fromOffset(0, 28), 20, color, Enum.Font.GothamBlack)
+	amount.AutomaticSize = Enum.AutomaticSize.X
+	amount.LayoutOrder = 2
+	return amount
+end
+local goldText = rewardCell(1, "Gold", GOLD)
+local gemsText = rewardCell(2, "Gems", GEM)
+local shardsText = rewardCell(3, "Shards", SHARD)
 
 -- Damage summary
 label(panel, "DAMAGE SUMMARY", UDim2.fromOffset(24, 152), UDim2.fromOffset(240, 20), 14, SUBTLE, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)

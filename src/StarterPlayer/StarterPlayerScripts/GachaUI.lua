@@ -1,8 +1,9 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: GachaUI
--- (replaces the earlier version: a redesigned summon window with a rotating 3D model of the
---  featured unit, and a full-screen reveal where cards flip over one by one)
+-- (replaces the earlier version: gem amounts use the gem icon from CurrencyIcons)
+-- A summon window with a rotating 3D model of the featured unit, and a full-screen reveal
+-- where cards flip over one by one.
 -- The summon window pops up when you walk onto the lobby's Summon Altar (the Wishing
 -- Fountain) and closes when you step off (or press the X). Summoning plays a reveal: an orb
 -- charges toward the color of your best pull, bursts, and the cards flip in order.
@@ -15,6 +16,7 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local UnitModels = require(ReplicatedStorage:WaitForChild("UnitModels"))
+local CurrencyIcons = require(ReplicatedStorage:WaitForChild("CurrencyIcons"))
 local summonRemote = ReplicatedStorage:WaitForChild("SummonRemote")
 local player = Players.LocalPlayer
 
@@ -309,9 +311,9 @@ stroke(close, WHITE, 1, 0.85)
 local gemRow = frame(window, UDim2.fromOffset(RX, 84), UDim2.fromOffset(RW, 52), GLASS, 0.2)
 corner(gemRow, 12)
 stroke(gemRow, WHITE, 1, 0.9)
-local gemIcon = diamond(gemRow, 14, GEM)
-gemIcon.Position = UDim2.fromOffset(24, 26)
-gradient(gemIcon, WHITE, Color3.fromRGB(120, 180, 220), 90)
+local gemIcon = CurrencyIcons.Make("Gems", 30)
+gemIcon.Position = UDim2.fromOffset(10, 11)
+gemIcon.Parent = gemRow
 local gemsLabel = label(gemRow, "", UDim2.fromOffset(44, 0), UDim2.new(0.6, -44, 1, 0), 22, WHITE, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
 label(gemRow, "GEMS", UDim2.new(0.6, 0, 0, 0), UDim2.new(0.4, -16, 1, 0), 11, DIM, Enum.Font.GothamBlack, Enum.TextXAlignment.Right)
 
@@ -407,13 +409,12 @@ local function summonButton(x, width, titleText, cost, primary)
 	local costLayout = Instance.new("UIListLayout")
 	costLayout.FillDirection = Enum.FillDirection.Horizontal
 	costLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	costLayout.Padding = UDim.new(0, 8)
+	costLayout.Padding = UDim.new(0, 6)
 	costLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	costLayout.Parent = costRow
-	local iconBox = frame(costRow, UDim2.new(), UDim2.fromOffset(12, 12), WHITE, 1)
-	iconBox.LayoutOrder = 1
-	local icon = diamond(iconBox, 9, GEM)
-	icon.Position = UDim2.fromScale(0.5, 0.5)
+	local icon = CurrencyIcons.Make("Gems", 20)
+	icon.LayoutOrder = 1
+	icon.Parent = costRow
 	local costText = label(costRow, commas(cost), UDim2.new(), UDim2.fromOffset(0, 20), 15, primary and WHITE or GEM, Enum.Font.GothamBold)
 	costText.AutomaticSize = Enum.AutomaticSize.X
 	costText.LayoutOrder = 2
