@@ -1,12 +1,15 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: PlacementUI
--- (replaces the earlier version: a unit's name tag shows only while you have it clicked)
--- HUD (wave, base HP, cash), unit hotbar, click-to-place with a range preview.
--- Controls: click a unit in the hotbar, then click a green plot to place it.
+-- (replaces the earlier version: the team bar at the bottom (see InventoryUI) is the hotbar
+--  in matches too, so this script no longer draws its own. Keys 1-6 follow the team slots.)
+-- HUD (wave, base HP, cash) and click-to-place with a range preview.
+-- Controls: click a unit on the team bar, then click a green plot to place it.
 -- Click a placed unit (with nothing selected) to upgrade or sell it.
--- Keys 1-6 pick the unit in that hotbar slot (press the same key again to put it away).
--- Each hotbar slot shows how many of that unit you've placed out of its limit (e.g. 2/5).
+-- Keys 1-6 pick the unit in that team slot (press the same key again to put it away).
+-- The team bar shows each unit's cost and how many you've placed out of its limit (e.g. 2/5).
+-- It talks to this script through the "SelectUnit" BindableEvent (team bar -> pick a unit)
+-- and the "PlacingUnit" attribute on the player (this script -> which unit is being placed).
 -- Q or right-click cancels / closes. (When nothing is open, Q is sprint/dash: see MovementController.)
 
 local Players = game:GetService("Players")
@@ -59,7 +62,7 @@ Instance.new("UICorner", hud).CornerRadius = UDim.new(0, 8)
 
 local toast = Instance.new("TextLabel")
 toast.Size = UDim2.fromOffset(320, 28)
-toast.Position = UDim2.new(0.5, -160, 1, -130)
+toast.Position = UDim2.new(0.5, -160, 1, -190) -- above the team bar
 toast.BackgroundTransparency = 1
 toast.TextColor3 = Color3.fromRGB(255, 120, 120)
 toast.TextStrokeTransparency = 0.5
@@ -68,7 +71,9 @@ toast.TextSize = 18
 toast.Text = ""
 toast.Parent = gui
 
+-- (the old hotbar frame is kept but never shown: the team bar replaced it)
 local hotbar = Instance.new("Frame")
+hotbar.Visible = false
 hotbar.Size = UDim2.fromOffset(720, 70)
 hotbar.Position = UDim2.new(0.5, -360, 1, -90)
 hotbar.BackgroundTransparency = 1
@@ -368,86 +373,47 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 end)
 
--- ===== HOTBAR =====
-local hotbarButtons = {} -- [unit name] = its hotbar button
-
--- Outlines the hotbar slot of the unit you're currently placing
+-- ===== HOTBAR (drawn by the team bar in InventoryUI) =====
+-- Tells the team bar which unit you're placing, so it can outline that slot
 function refreshHotbarHighlight()
-	for name, b in pairs(hotbarButtons) do
-		b.UIStroke.Enabled = name == selected
-	end
+	player:SetAttribute("PlacingUnit", selected or "")
 end
 
--- Shows "placed/limit" on each slot and greys out the ones that are full
+-- Stop placing a unit once you've hit its limit
 local function refreshHotbarCounts()
-	for i, name in ipairs(hotbarNames) do
-		local b = hotbarButtons[name]
-		if b then
-			local limit = UnitData.GetPlacementLimit(name)
-			local placed = placedCount(name)
-			local full = placed >= limit
-			local color = UnitData.RarityColor[UnitData.UnitRarity[name]]
-			b.Text = string.format("[%d] %s\n$%d  -  %d/%d", i, name, myStats(name).Cost, placed, limit)
-			b.BackgroundColor3 = full and color:Lerp(Color3.fromRGB(60, 60, 70), 0.75) or color
-			b.TextTransparency = full and 0.35 or 0
-		end
-	end
-	-- stop placing a unit once you've hit its limit
 	if selected and atLimit(selected) then
 		selectUnit(nil)
 	end
 end
 
+-- The units in team slot order (the "Equipped" attribute is already in slot order), so
+-- key 1 is slot 1 on the team bar
 local function rebuildHotbar()
-	for _, c in ipairs(hotbar:GetChildren()) do
-		if c:IsA("TextButton") then c:Destroy() end
-	end
-
 	local names = {}
 	for name in string.gmatch(player:GetAttribute("Equipped") or "", "[^,]+") do
 		if UnitData.GetStats(name) then
 			table.insert(names, name)
 		end
 	end
-	table.sort(names, function(a, b)
-		local ca, cb = myStats(a).Cost, myStats(b).Cost
-		if ca ~= cb then return ca < cb end
-		return a < b
-	end)
-
 	hotbarNames = names
-	table.clear(hotbarButtons)
-
-	for i, name in ipairs(names) do
-		local stats = myStats(name)
-		local b = Instance.new("TextButton")
-		b.LayoutOrder = i
-		b.Size = UDim2.fromOffset(100, 64)
-		b.BackgroundColor3 = UnitData.RarityColor[UnitData.UnitRarity[name]]
-		b.TextColor3 = Color3.new(1, 1, 1)
-		b.TextStrokeTransparency = 0.2
-		b.Font = Enum.Font.GothamBold
-		b.TextSize = 14
-		b.TextWrapped = true
-		b.Text = string.format("[%d] %s\n$%d", i, name, stats.Cost)
-		b.Parent = hotbar
-		Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
-		local stroke = Instance.new("UIStroke")
-		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		stroke.Thickness = 3
-		stroke.Color = Color3.new(1, 1, 1)
-		stroke.Enabled = false
-		stroke.Parent = b
-		hotbarButtons[name] = b
-		b.Activated:Connect(function()
-			if atLimit(name) then
-				showToast(string.format("%s limit reached (%d/%d).", name, placedCount(name), UnitData.GetPlacementLimit(name)))
-				return
-			end
-			selectUnit(name)
-		end)
-	end
 end
+
+-- The team bar asks to pick a unit through this event: the same rules as the number keys
+local selectEvent = Instance.new("BindableEvent")
+selectEvent.Name = "SelectUnit"
+selectEvent.Parent = gui
+selectEvent.Event:Connect(function(name)
+	if player:GetAttribute("InMatch") ~= true or typeof(name) ~= "string" then return end
+	if not table.find(hotbarNames, name) then return end
+	if selected == name then
+		selectUnit(nil) -- clicking the same slot again puts it away
+	elseif atLimit(name) then
+		showToast(string.format("%s limit reached (%d/%d).", name, placedCount(name), UnitData.GetPlacementLimit(name)))
+	else
+		selectUnit(name)
+	end
+end)
+
 rebuildHotbar()
 refreshHotbarCounts()
 refreshHotbarHighlight()
@@ -455,7 +421,7 @@ player:GetAttributeChangedSignal("PlacedCounts"):Connect(refreshHotbarCounts)
 local function onTeamChanged()
 	rebuildHotbar()
 	refreshHotbarCounts()
-	if selected and not hotbarButtons[selected] then
+	if selected and not table.find(hotbarNames, selected) then
 		selectUnit(nil) -- the unit you were placing left your team
 	else
 		refreshHotbarHighlight()
@@ -470,7 +436,6 @@ player:GetAttributeChangedSignal("UnitProgress"):Connect(onTeamChanged)
 local function updateMatchVisibility()
 	local inMatch = player:GetAttribute("InMatch") == true
 	hud.Visible = inMatch
-	hotbar.Visible = inMatch
 	if not inMatch then
 		selectUnit(nil)
 		closePanel()

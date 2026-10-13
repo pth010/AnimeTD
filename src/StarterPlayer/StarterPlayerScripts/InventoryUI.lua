@@ -1,10 +1,11 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: InventoryUI
--- (replaces the earlier version: the team bar hides while the level select, summon or
---  Traits Cave window is open, so it can't cover their buttons)
--- The team bar runs along the bottom of the lobby screen. "Put on team" asks you to click
--- the slot to put the unit in.
+-- (replaces the earlier version: the team bar stays on screen in matches too, as the unit
+--  hotbar: click a slot (or press 1-6) to place that unit; slots show cost and placed/limit)
+-- The team bar runs along the bottom of the screen. In the lobby, "Put on team" asks you to
+-- click the slot to put the unit in. It hides while the level select, summon or Traits Cave
+-- window is open, so it can't cover their buttons.
 -- Every unit is its own slot in the grid, with its own trait, level, stars and lock. Click a
 -- unit to see it on the right and lock, equip, fuse, evolve or delete it. The top shows
 -- how many of your slots are used.
@@ -563,6 +564,7 @@ end
 -- light up and you click the one to put the unit in. Clicking a filled slot otherwise opens
 -- the inventory with that unit selected.
 local SLOT_W, SLOT_H, SLOT_GAP = 78, 100, 8
+local playerGuiRoot = player:WaitForChild("PlayerGui")
 local PICK_GOLD = Color3.fromRGB(255, 215, 80)
 
 local barGui = Instance.new("ScreenGui")
@@ -599,10 +601,30 @@ local pickText = label(pickBanner, "", UDim2.fromOffset(12, 0), UDim2.new(1, -11
 pickText.TextTruncate = Enum.TextTruncate.AtEnd
 local pickCancel = button(pickBanner, "Cancel", UDim2.new(1, -90, 0.5, -14), UDim2.fromOffset(80, 28), GRAY, 13)
 
-local slots = {} -- [slotIndex] = { Frame, Stroke, Plus, Number, Card, CardId }
+local slots = {} -- [slotIndex] = { Frame, Stroke, Plus, Number, Card, CardId, Cost, CostText, Full }
 local pickingId = nil
+local placedCounts = {} -- [unitName] = placed in the current match
+local readPlacedCounts -- defined below
+
+local function inMatch()
+	return player:GetAttribute("InMatch") == true
+end
+
+-- In a match, a slot picks that unit to place (PlacementUI does the placing)
+local function selectForPlacement(i)
+	local u = teamOrder[i] and byId[teamOrder[i]]
+	local hud = playerGuiRoot:FindFirstChild("TowerDefenseHUD")
+	local event = hud and hud:FindFirstChild("SelectUnit")
+	if u and event then
+		event:Fire(u.Name)
+	end
+end
 
 local function onSlotClicked(i)
+	if inMatch() then
+		selectForPlacement(i)
+		return
+	end
 	if pickingId then
 		local id = pickingId
 		pickingId = nil
@@ -637,7 +659,24 @@ for i = 1, UnitData.TeamSize do
 	local plus = label(slot, "+", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 26, DIM, Enum.Font.GothamBold)
 	local number = label(slot, tostring(i), UDim2.new(1, -18, 1, -18), UDim2.fromOffset(14, 14), 11, DIM, Enum.Font.GothamBlack)
 	number.ZIndex = 3
-	slots[i] = { Frame = slot, Stroke = slotStroke, Plus = plus, Number = number, Card = nil, CardId = nil }
+
+	-- match only: the unit's cost and how many you've placed out of its limit
+	local cost = frame(slot, UDim2.fromOffset(3, 48), UDim2.new(1, -6, 0, 15), BLACK, 0.25)
+	cost.ZIndex = 3
+	corner(cost, "round")
+	local costText = label(cost, "", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 10, WHITE, Enum.Font.GothamBlack)
+	costText.ZIndex = 3
+	cost.Visible = false
+	-- match only: darkens the slot when you've placed as many as you can
+	local full = frame(slot, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), BLACK, 0.45)
+	full.ZIndex = 4
+	corner(full, 8)
+	local fullText = label(full, "MAX", UDim2.fromScale(0, 0.15), UDim2.new(1, 0, 0, 20), 14, WHITE, Enum.Font.GothamBlack)
+	fullText.ZIndex = 4
+	full.Visible = false
+
+	slots[i] = { Frame = slot, Stroke = slotStroke, Plus = plus, Number = number, Card = nil, CardId = nil,
+		Cost = cost, CostText = costText, Full = full }
 
 	slot.Activated:Connect(function() onSlotClicked(i) end)
 end
@@ -663,10 +702,29 @@ refreshTeamBar = function()
 			s.Card.Team.Visible = false -- everything here is on the team
 		end
 		s.Plus.Visible = u == nil
-		-- picking: every slot glows gold
-		s.Stroke.Color = pickingId and PICK_GOLD or WHITE
-		s.Stroke.Thickness = pickingId and 2.5 or 1
-		s.Stroke.Transparency = pickingId and 0 or 0.8
+
+		-- in a match: cost + placed/limit, MAX when full, a white outline on the unit being placed
+		local match = inMatch()
+		local placing = match and u and player:GetAttribute("PlacingUnit") == u.Name
+		s.Cost.Visible = match and u ~= nil
+		s.Full.Visible = false
+		if match and u then
+			local limit = UnitData.GetPlacementLimit(u.Name)
+			local placed = placedCounts[u.Name] or 0
+			local unitCost = unitStats(u).Cost
+			s.CostText.Text = string.format("$%d  ·  %d/%d", unitCost, placed, limit)
+			s.CostText.TextColor3 = (player:GetAttribute("Cash") or 0) >= unitCost and WHITE or ERROR_COLOR
+			s.Full.Visible = placed >= limit
+		end
+
+		-- picking (lobby): every slot glows gold
+		if placing then
+			s.Stroke.Color, s.Stroke.Thickness, s.Stroke.Transparency = WHITE, 3, 0
+		else
+			s.Stroke.Color = pickingId and PICK_GOLD or WHITE
+			s.Stroke.Thickness = pickingId and 2.5 or 1
+			s.Stroke.Transparency = pickingId and 0 or 0.8
+		end
 		s.Plus.TextColor3 = pickingId and PICK_GOLD or DIM
 	end
 
@@ -679,7 +737,29 @@ refreshTeamBar = function()
 	barStroke.Color = picking and PICK_GOLD or WHITE
 	barStroke.Transparency = picking and 0.2 or 0.8
 	local autoOn = player:GetAttribute("AutoEquip") == true
-	barHint.Text = picking and "" or (autoOn and "Auto-equip ON" or string.format("%d / %d", #teamOrder, UnitData.TeamSize))
+	if inMatch() then
+		barHint.Text = "Click a unit or press 1-" .. UnitData.TeamSize .. " to place it"
+	else
+		barHint.Text = picking and "" or (autoOn and "Auto-equip ON" or string.format("%d / %d", #teamOrder, UnitData.TeamSize))
+	end
+end
+
+-- How many of each unit you have placed in the current match (kept up to date by the server)
+readPlacedCounts = function()
+	table.clear(placedCounts)
+	for unit, n in string.gmatch(player:GetAttribute("PlacedCounts") or "", "([^;=]+)=(%d+)") do
+		placedCounts[unit] = tonumber(n)
+	end
+end
+readPlacedCounts()
+player:GetAttributeChangedSignal("PlacedCounts"):Connect(function()
+	readPlacedCounts()
+	refreshTeamBar()
+end)
+for _, attribute in ipairs({ "PlacingUnit", "Cash", "InMatch" }) do
+	player:GetAttributeChangedSignal(attribute):Connect(function()
+		refreshTeamBar()
+	end)
 end
 
 startPicking = function(id)
@@ -1085,7 +1165,7 @@ end
 local function updateVisibility()
 	local inMatch = player:GetAttribute("InMatch") == true
 	openBtn.Visible = not inMatch
-	barGui.Enabled = not inMatch and not barCovered() -- the match has its own hotbar
+	barGui.Enabled = not barCovered() -- on screen in the lobby and in matches
 	if inMatch and pickingId then
 		pickingId = nil
 		refreshTeamBar()
@@ -1103,7 +1183,7 @@ player:GetAttributeChangedSignal("InMatch"):Connect(updateVisibility)
 task.spawn(function()
 	while true do
 		task.wait(0.25)
-		local shouldShow = player:GetAttribute("InMatch") ~= true and not barCovered()
+		local shouldShow = not barCovered()
 		if barGui.Enabled ~= shouldShow then
 			if not shouldShow and pickingId then
 				pickingId = nil
