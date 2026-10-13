@@ -6,7 +6,8 @@
 --  Old saves are converted automatically: a stack of 3 becomes 3 separate units.
 --  Units can be put into a chosen team slot, see PlayerData.EquipToSlot. Each player's screen
 --  layout (where the team bar, Inventory button and currency counter sit) is saved too, and
---  so are their settings from the Settings popup.)
+--  so are their settings from the Settings popup. Bumping SETTINGS_VERSION switches every
+--  player's settings back to on (the defaults) once, the next time they join.)
 --
 -- Single source of truth for each player's gems, gold, trait shards, pity, units, locks,
 -- team and settings.
@@ -55,6 +56,9 @@ local LAYOUT_MOVE_LIMIT = 0.5          -- up to half a screen in any direction
 local LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX = 0.6, 1.6
 
 -- On/off settings from the Settings popup, and what they are for a new player
+-- Raise SETTINGS_VERSION to reset everyone's settings to these defaults once (saves made with
+-- an older version are ignored; after the reset, players' own choices are kept again).
+local SETTINGS_VERSION = 2
 PlayerData.SettingDefaults = {
 	TraitIcons = true, -- trait icons over placed units
 	HealthBars = true, -- health bars over enemies
@@ -423,7 +427,8 @@ function PlayerData.Load(player)
 		profile.Pity = tonumber(saved.Pity) or 0
 		profile.BonusSlots = cleanNumber(saved.BonusSlots, 0, 100000) or 0
 		profile.UILayout = cleanLayout(saved.UILayout)
-		profile.Settings = cleanSettings(saved.Settings)
+		-- older settings saves are reset to the defaults (all on)
+		profile.Settings = cleanSettings(saved.SettingsVersion == SETTINGS_VERSION and saved.Settings or nil)
 
 		if type(saved.Units) == "table" then
 			if saved.Version == SAVE_VERSION then
@@ -513,6 +518,7 @@ function PlayerData.Save(player)
 				BonusSlots = profile.BonusSlots,
 				UILayout = profile.UILayout,
 				Settings = profile.Settings,
+				SettingsVersion = SETTINGS_VERSION,
 			}
 		end)
 	end)
