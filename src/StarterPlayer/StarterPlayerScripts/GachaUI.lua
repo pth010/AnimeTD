@@ -237,7 +237,7 @@ fade(floorGlow, 0, 1, 0).Transparency = NumberSequence.new({
 local modelBox = frame(hero, UDim2.fromOffset(20, 34), UDim2.new(1, -40, 0, 270), WHITE, 1)
 local heroModel = nil
 if featuredName then
-	local _, model = unitViewport(modelBox, featuredName, 200)
+	local _, model = unitViewport(modelBox, featuredName, -20)
 	heroModel = model
 end
 
@@ -743,7 +743,7 @@ local function makeCard(unit, pos, size)
 		cardStroke.Transparency = unit.AutoDeleted and 0.7 or 0.1
 		cardStroke.Thickness = high and 2.5 or 1.5
 		if not unit.AutoDeleted then
-			unitViewport(modelArea, unit.Name, 200)
+			unitViewport(modelArea, unit.Name, -20)
 		else
 			card.BackgroundTransparency = 0.35
 			nameLabel.TextTransparency = 0.45
@@ -950,7 +950,7 @@ RunService.RenderStepped:Connect(function(dt)
 	rays.Rotation = (clock * 6) % 360
 	halo.BackgroundTransparency = 0.55 + math.sin(clock * 1.6) * 0.08
 	if heroModel then
-		heroModel:PivotTo(CFrame.Angles(0, math.rad(200 + clock * 25), 0))
+		heroModel:PivotTo(CFrame.Angles(0, math.rad(-20 + clock * 25), 0))
 	end
 	-- the sheen crosses the x10 button once every 3 seconds
 	local t = (clock % 3) / 3

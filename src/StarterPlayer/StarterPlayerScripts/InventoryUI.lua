@@ -1,9 +1,11 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: InventoryUI
--- (replaces the earlier version: every unit is its own slot in a grid, with its own trait,
---  level, stars and lock. Click a unit to see it on the right and lock, equip, fuse,
---  evolve or delete it. The top shows how many of your slots are used.)
+-- (replaces the earlier version: every unit shows a picture of itself, and traits show as
+--  icons. Tiles are kept between refreshes, so pictures aren't rebuilt every change.)
+-- Every unit is its own slot in the grid, with its own trait, level, stars and lock. Click a
+-- unit to see it on the right and lock, equip, fuse, evolve or delete it. The top shows
+-- how many of your slots are used.
 -- Lobby only. Locked units can't be deleted or fed. Deleting asks for confirmation.
 
 local Players = game:GetService("Players")
@@ -12,6 +14,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
 local ProgressData = require(ReplicatedStorage:WaitForChild("ProgressData"))
+local UnitModels = require(ReplicatedStorage:WaitForChild("UnitModels"))
 local inventoryRemote = ReplicatedStorage:WaitForChild("InventoryRemote")
 local player = Players.LocalPlayer
 
@@ -220,7 +223,7 @@ grid.AutomaticCanvasSize = Enum.AutomaticSize.Y
 grid.Parent = window
 corner(grid, 10)
 local gridLayout = Instance.new("UIGridLayout")
-gridLayout.CellSize = UDim2.fromOffset(76, 94)
+gridLayout.CellSize = UDim2.fromOffset(78, 100)
 gridLayout.CellPadding = UDim2.fromOffset(6, 6)
 gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 gridLayout.Parent = grid
@@ -238,35 +241,43 @@ local detailBody = frame(detail, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), W
 detailBody.Visible = false
 
 local DW = WIDTH - GRID_W - 34 - 24 -- usable width inside the detail panel
-local dName = label(detailBody, "", UDim2.fromOffset(12, 10), UDim2.fromOffset(DW, 24), 18, WHITE, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
+-- portrait on the left, name / rarity / level beside it
+local dPortrait = frame(detailBody, UDim2.fromOffset(12, 10), UDim2.fromOffset(72, 72), PANEL)
+corner(dPortrait, 10)
+dPortrait.ClipsDescendants = true
+local dPortraitStroke = stroke(dPortrait, WHITE, 2, 0)
+local dPortraitName = nil -- whose picture is in dPortrait right now
+local TX = 94 -- text column beside the portrait
+local dName = label(detailBody, "", UDim2.fromOffset(TX, 12), UDim2.fromOffset(DW + 12 - TX, 22), 16, WHITE, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
 dName.TextTruncate = Enum.TextTruncate.AtEnd
-local dRarity = label(detailBody, "", UDim2.fromOffset(12, 34), UDim2.fromOffset(DW, 16), 12, WHITE, Enum.Font.GothamBold, Enum.TextXAlignment.Left)
-local dLevel = label(detailBody, "", UDim2.fromOffset(12, 54), UDim2.fromOffset(DW, 18), 14, WHITE, Enum.Font.GothamBold, Enum.TextXAlignment.Left)
-local dXPBack = frame(detailBody, UDim2.fromOffset(12, 76), UDim2.fromOffset(DW, 5), PANEL)
+local dRarity = label(detailBody, "", UDim2.fromOffset(TX, 34), UDim2.fromOffset(DW + 12 - TX, 16), 12, WHITE, Enum.Font.GothamBold, Enum.TextXAlignment.Left)
+local dLevel = label(detailBody, "", UDim2.fromOffset(TX, 52), UDim2.fromOffset(DW + 12 - TX, 18), 13, WHITE, Enum.Font.GothamBold, Enum.TextXAlignment.Left)
+local dXPBack = frame(detailBody, UDim2.fromOffset(TX, 74), UDim2.fromOffset(DW + 12 - TX, 5), PANEL)
 corner(dXPBack, "round")
 local dXPFill = frame(dXPBack, UDim2.fromScale(0, 0), UDim2.fromScale(0, 1), Color3.fromRGB(110, 200, 255))
 corner(dXPFill, "round")
-local dStats = label(detailBody, "", UDim2.fromOffset(12, 88), UDim2.fromOffset(DW, 36), 13, SUBTLE, Enum.Font.Gotham, Enum.TextXAlignment.Left)
+local dStats = label(detailBody, "", UDim2.fromOffset(12, 90), UDim2.fromOffset(DW, 36), 13, SUBTLE, Enum.Font.Gotham, Enum.TextXAlignment.Left)
 dStats.TextYAlignment = Enum.TextYAlignment.Top
 
-local dTraitBox = frame(detailBody, UDim2.fromOffset(12, 128), UDim2.fromOffset(DW, 50), PANEL)
+local dTraitBox = frame(detailBody, UDim2.fromOffset(12, 130), UDim2.fromOffset(DW, 50), PANEL)
 corner(dTraitBox, 8)
 local dTraitStroke = stroke(dTraitBox, DIM, 1, 0.4)
-local dTraitName = label(dTraitBox, "", UDim2.fromOffset(10, 6), UDim2.new(1, -20, 0, 18), 14, WHITE, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
-local dTraitDesc = label(dTraitBox, "", UDim2.fromOffset(10, 26), UDim2.new(1, -20, 0, 18), 12, SUBTLE, Enum.Font.Gotham, Enum.TextXAlignment.Left)
+local dTraitIconSlot = frame(dTraitBox, UDim2.fromOffset(7, 7), UDim2.fromOffset(36, 36), WHITE, 1)
+local dTraitName = label(dTraitBox, "", UDim2.fromOffset(50, 6), UDim2.new(1, -58, 0, 18), 14, WHITE, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
+local dTraitDesc = label(dTraitBox, "", UDim2.fromOffset(50, 26), UDim2.new(1, -58, 0, 18), 12, SUBTLE, Enum.Font.Gotham, Enum.TextXAlignment.Left)
 dTraitDesc.TextTruncate = Enum.TextTruncate.AtEnd
 
-local dStatus = label(detailBody, "", UDim2.fromOffset(12, 184), UDim2.fromOffset(DW, 16), 12, TEAM_GREEN, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
+local dStatus = label(detailBody, "", UDim2.fromOffset(12, 186), UDim2.fromOffset(DW, 16), 12, TEAM_GREEN, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
 
 local function actionButton(y, color)
 	return button(detailBody, "", UDim2.fromOffset(12, y), UDim2.fromOffset(DW, 32), color, 13)
 end
 local equipBtn = actionButton(208, GREEN)
-local lockBtn = actionButton(246, Color3.fromRGB(70, 110, 190))
-local fuseBtn = actionButton(284, Color3.fromRGB(50, 140, 200))
-local evolveBtn = actionButton(322, Color3.fromRGB(220, 160, 40))
-local deleteBtn = actionButton(360, RED)
-local evolveNote = label(detailBody, "", UDim2.fromOffset(12, 396), UDim2.fromOffset(DW, 30), 11, DIM, Enum.Font.Gotham, Enum.TextXAlignment.Left)
+local lockBtn = actionButton(245, Color3.fromRGB(70, 110, 190))
+local fuseBtn = actionButton(282, Color3.fromRGB(50, 140, 200))
+local evolveBtn = actionButton(319, Color3.fromRGB(220, 160, 40))
+local deleteBtn = actionButton(356, RED)
+local evolveNote = label(detailBody, "", UDim2.fromOffset(12, 393), UDim2.fromOffset(DW, 30), 11, DIM, Enum.Font.Gotham, Enum.TextXAlignment.Left)
 evolveNote.TextYAlignment = Enum.TextYAlignment.Top
 
 -- ===== State =====
@@ -316,6 +327,16 @@ local function refreshDetail()
 	local onTeam = equipped[u.Id] == true
 	local autoOn = player:GetAttribute("AutoEquip") == true
 
+	if dPortraitName ~= u.Name then
+		dPortraitName = u.Name
+		for _, c in ipairs(dPortrait:GetChildren()) do
+			if c:IsA("ViewportFrame") then c:Destroy() end
+		end
+		UnitModels.Portrait(u.Name).Parent = dPortrait
+	end
+	dPortrait.BackgroundColor3 = darker(rarity.Color, 0.55)
+	dPortraitStroke.Color = rarity.Color
+
 	dName.Text = u.Name
 	dRarity.Text = rarityName
 	dRarity.TextColor3 = rarity.Color
@@ -332,6 +353,18 @@ local function refreshDetail()
 	end
 
 	local trait = TraitData.Get(u.Trait)
+	for _, c in ipairs(dTraitIconSlot:GetChildren()) do
+		c:Destroy()
+	end
+	if trait then
+		TraitData.MakeIcon(trait.Name, 36).Parent = dTraitIconSlot
+	else
+		local none = frame(dTraitIconSlot, UDim2.fromScale(0.5, 0.5), UDim2.fromOffset(24, 24), GLASS)
+		none.AnchorPoint = Vector2.new(0.5, 0.5)
+		none.Rotation = 45
+		corner(none, 4)
+		stroke(none, DIM, 1, 0.3)
+	end
 	if trait then
 		dTraitName.Text = trait.Name .. "  ·  " .. trait.Tier
 		dTraitName.TextColor3 = trait.Color
@@ -375,97 +408,122 @@ local function refreshDetail()
 end
 
 -- ===== Tiles =====
-local function makeTile(u, order)
-	local rarityName = UnitData.UnitRarity[u.Name]
-	local color = rarityByName[rarityName].Color
-	local isSelected = u.Id == selectedId
+-- One tile per unit, kept between refreshes (keyed by unit id) so its picture is only built
+-- once. Refreshing just updates the text, badges, trait icon and position.
+local tiles = {}      -- [unitId] = tile parts
+local emptyTiles = {} -- spare empty-slot frames
 
-	local tile = Instance.new("TextButton")
-	tile.LayoutOrder = order
-	tile.Text = ""
-	tile.AutoButtonColor = true
-	tile.BackgroundColor3 = darker(color, 0.62)
-	tile.Parent = grid
-	corner(tile, 8)
-	stroke(tile, isSelected and WHITE or color, isSelected and 2.5 or 1, isSelected and 0 or 0.45)
+local function styleSelection(t)
+	local selectedNow = t.Id == selectedId
+	t.Stroke.Color = selectedNow and WHITE or t.Color
+	t.Stroke.Thickness = selectedNow and 2.5 or 1
+	t.Stroke.Transparency = selectedNow and 0 or 0.45
+end
 
-	local nameLabel = label(tile, u.Name, UDim2.fromOffset(4, 3), UDim2.new(1, -8, 0, 26), 11, WHITE, Enum.Font.GothamBold)
-	nameLabel.TextScaled = true
-	local nameSize = Instance.new("UITextSizeConstraint")
-	nameSize.MaxTextSize = 11
-	nameSize.Parent = nameLabel
+local function createTile(u)
+	local color = rarityByName[UnitData.UnitRarity[u.Name]].Color
+	local btn = Instance.new("TextButton")
+	btn.Text = ""
+	btn.AutoButtonColor = true
+	btn.BackgroundColor3 = darker(color, 0.55)
+	btn.ClipsDescendants = true
+	btn.Parent = grid
+	corner(btn, 8)
+	local shade = Instance.new("UIGradient")
+	shade.Color = ColorSequence.new(WHITE, Color3.fromRGB(110, 110, 120))
+	shade.Rotation = 90
+	shade.Parent = btn
 
-	local level = ProgressData.LevelFromXP(u.XP)
-	label(tile, "Lv " .. level, UDim2.fromOffset(5, 32), UDim2.fromOffset(44, 16), 13, WHITE, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
-	if u.Stars > 0 then
-		label(tile, string.rep("★", u.Stars), UDim2.fromOffset(5, 48), UDim2.fromOffset(60, 14), 12, ProgressData.StarColor, Enum.Font.GothamBold, Enum.TextXAlignment.Left)
-	end
+	-- the picture fills the top of the tile
+	local pic = frame(btn, UDim2.fromScale(0, 0), UDim2.new(1, 0, 0, 66), WHITE, 1)
+	UnitModels.Portrait(u.Name).Parent = pic
 
-	-- team and lock badges
-	local bx = 76 - 18
-	if u.Locked then
-		local lock = frame(tile, UDim2.fromOffset(bx, 32), UDim2.fromOffset(14, 14), LOCK_GOLD)
-		corner(lock, 3)
-		label(lock, "L", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 10, BLACK, Enum.Font.GothamBlack)
-		bx -= 17
-	end
-	if equipped[u.Id] then
-		local team = frame(tile, UDim2.fromOffset(bx, 32), UDim2.fromOffset(14, 14), TEAM_GREEN)
-		corner(team, "round")
-		label(team, "T", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 10, BLACK, Enum.Font.GothamBlack)
-	end
+	-- name + level under the picture, on a dark band so they read over any color
+	local band = frame(btn, UDim2.new(0, 0, 1, -34), UDim2.new(1, 0, 0, 34), BLACK, 0.35)
+	local nameLabel = label(band, u.Name, UDim2.fromOffset(4, 2), UDim2.new(1, -8, 0, 14), 10, WHITE, Enum.Font.GothamBold)
+	nameLabel.TextWrapped = false
+	nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	local levelLabel = label(band, "", UDim2.fromOffset(4, 17), UDim2.fromOffset(40, 14), 11, WHITE, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
+	local starsLabel = label(band, "", UDim2.new(1, -40, 0, 17), UDim2.fromOffset(36, 14), 10, ProgressData.StarColor, Enum.Font.GothamBold, Enum.TextXAlignment.Right)
 
-	-- trait strip along the bottom
-	local trait = TraitData.Get(u.Trait)
-	if trait then
-		local strip = frame(tile, UDim2.new(0, 3, 1, -21), UDim2.new(1, -6, 0, 18), darker(trait.Color, 0.55))
-		corner(strip, 5)
-		stroke(strip, trait.Color, 1, 0.2)
-		local t = label(strip, trait.Name, UDim2.fromOffset(3, 0), UDim2.new(1, -6, 1, 0), 10, WHITE, Enum.Font.GothamBlack)
-		t.TextTruncate = Enum.TextTruncate.AtEnd
-	end
+	-- badges over the picture: team + lock (top left), trait icon (top right)
+	local teamBadge = frame(btn, UDim2.fromOffset(4, 4), UDim2.fromOffset(15, 15), TEAM_GREEN)
+	corner(teamBadge, "round")
+	label(teamBadge, "T", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 10, BLACK, Enum.Font.GothamBlack)
+	local lockBadge = frame(btn, UDim2.fromOffset(4, 4), UDim2.fromOffset(15, 15), LOCK_GOLD)
+	corner(lockBadge, 3)
+	label(lockBadge, "L", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 10, BLACK, Enum.Font.GothamBlack)
+	local traitSlot = frame(btn, UDim2.new(1, -27, 0, 3), UDim2.fromOffset(24, 24), WHITE, 1)
 
-	tile.Activated:Connect(function()
-		if selectedId ~= u.Id then
-			selectedId = u.Id
+	local t = {
+		Id = u.Id, Button = btn, Color = color, Stroke = stroke(btn, color, 1, 0.45),
+		Level = levelLabel, Stars = starsLabel, Team = teamBadge, Lock = lockBadge,
+		TraitSlot = traitSlot, TraitShown = false,
+	}
+	btn.Activated:Connect(function()
+		if selectedId ~= t.Id then
+			selectedId = t.Id
 			confirmEvolve = false
 		end
-		-- restyle just the selection instead of rebuilding the whole grid
-		for _, c in ipairs(grid:GetChildren()) do
-			if c:IsA("TextButton") then
-				local s = c:FindFirstChildOfClass("UIStroke")
-				local id = c:GetAttribute("UnitId")
-				local cu = byId[id]
-				if s and cu then
-					local selectedNow = id == selectedId
-					s.Color = selectedNow and WHITE or rarityByName[UnitData.UnitRarity[cu.Name]].Color
-					s.Thickness = selectedNow and 2.5 or 1
-					s.Transparency = selectedNow and 0 or 0.45
-				end
-			end
+		for _, other in pairs(tiles) do
+			styleSelection(other)
 		end
 		refreshDetail()
 	end)
-	tile:SetAttribute("UnitId", u.Id)
+	return t
 end
 
-local function emptyTile(order)
-	local slot = frame(grid, UDim2.new(), UDim2.new(), WHITE, 1)
-	slot.LayoutOrder = order
-	corner(slot, 8)
-	stroke(slot, WHITE, 1, 0.9)
+local function updateTile(t, u, order)
+	t.Button.LayoutOrder = order
+	t.Level.Text = "Lv " .. ProgressData.LevelFromXP(u.XP)
+	t.Stars.Text = string.rep("★", u.Stars)
+	local onTeam = equipped[u.Id] == true
+	t.Team.Visible = onTeam
+	t.Lock.Visible = u.Locked
+	t.Lock.Position = UDim2.fromOffset(onTeam and 22 or 4, 4)
+	if t.TraitShown ~= (u.Trait or false) then
+		t.TraitShown = u.Trait or false
+		for _, c in ipairs(t.TraitSlot:GetChildren()) do
+			c:Destroy()
+		end
+		local icon = u.Trait and TraitData.MakeIcon(u.Trait, 24)
+		if icon then icon.Parent = t.TraitSlot end
+	end
+	styleSelection(t)
 end
 
 local function rebuildGrid()
-	for _, c in ipairs(grid:GetChildren()) do
-		if c:IsA("GuiObject") then c:Destroy() end
-	end
 	local maxSlots = player:GetAttribute("MaxSlots") or UnitData.BaseSlots
+	local alive = {}
 	for i, u in ipairs(units) do
-		makeTile(u, i)
+		alive[u.Id] = true
+		local t = tiles[u.Id]
+		if not t then
+			t = createTile(u)
+			tiles[u.Id] = t
+		end
+		updateTile(t, u, i)
 	end
-	for i = #units + 1, maxSlots do
-		emptyTile(i)
+	for id, t in pairs(tiles) do
+		if not alive[id] then
+			t.Button:Destroy()
+			tiles[id] = nil
+		end
+	end
+
+	-- empty slots after the units, up to your capacity
+	local emptyCount = math.max(0, maxSlots - #units)
+	while #emptyTiles < emptyCount do
+		local slot = frame(grid, UDim2.new(), UDim2.new(), WHITE, 1)
+		corner(slot, 8)
+		stroke(slot, WHITE, 1, 0.9)
+		table.insert(emptyTiles, slot)
+	end
+	while #emptyTiles > emptyCount do
+		table.remove(emptyTiles):Destroy()
+	end
+	for i, slot in ipairs(emptyTiles) do
+		slot.LayoutOrder = #units + i
 	end
 
 	local used = #units

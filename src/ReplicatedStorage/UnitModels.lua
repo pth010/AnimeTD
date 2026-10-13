@@ -1,6 +1,7 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: UnitModels
+-- (replaces the earlier version: adds UnitModels.Portrait for unit pictures in menus)
 -- Builds the character model for each unit out of parts (no uploaded assets needed).
 -- Every unit has a "look" below: colors, hair style, weapon and extras like a cape,
 -- wings, fox tails or a sparkling aura. Change them freely.
@@ -11,6 +12,8 @@
 -- -Z direction (Roblox's default "front"). Units without a custom model keep the built one.
 --
 -- UnitModels.Build(unitName) returns a Model whose pivot is at the unit's feet, facing -Z.
+-- UnitModels.Portrait(unitName, full) returns a ViewportFrame picture of the unit for menus:
+--   head and shoulders by default, or the whole body when `full` is true.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
@@ -448,6 +451,55 @@ function UnitModels.Build(unitName)
 		return prepareCustom(custom)
 	end
 	return buildCharacter(unitName, UnitModels.Looks[unitName] or defaultLook(unitName))
+end
+
+-- ===== Portraits for menus =====
+-- Each unit's model is built once and copied for every picture, so a full inventory
+-- doesn't rebuild the same character a hundred times.
+local portraitTemplates = {}
+
+function UnitModels.Portrait(unitName, full)
+	local vp = Instance.new("ViewportFrame")
+	vp.Name = "Portrait"
+	vp.Size = UDim2.fromScale(1, 1)
+	vp.BackgroundTransparency = 1
+	vp.Ambient = Color3.fromRGB(175, 175, 195)
+	vp.LightColor = Color3.fromRGB(255, 245, 235)
+	vp.LightDirection = Vector3.new(-0.4, -1, 0.6)
+
+	local template = portraitTemplates[unitName]
+	if not template then
+		local ok, built = pcall(UnitModels.Build, unitName)
+		if not ok or not built then
+			return vp
+		end
+		template = built
+		portraitTemplates[unitName] = template
+	end
+
+	local model = template:Clone()
+	-- a slight turn so the face reads (the model faces -Z, toward the camera below)
+	model:PivotTo(CFrame.Angles(0, math.rad(-20), 0))
+	model.Parent = vp
+
+	local camera = Instance.new("Camera")
+	camera.FieldOfView = 30
+	local boxCf, boxSize = model:GetBoundingBox()
+	local height = boxSize.Y
+	local focus, visible
+	if full then
+		focus = boxCf.Position
+		visible = math.max(height, boxSize.X * 1.2) * 1.2
+	else
+		-- head and shoulders: aim near the top of the body, about 60% of the height in view
+		focus = Vector3.new(boxCf.Position.X, height * 0.72, boxCf.Position.Z)
+		visible = height * 0.6
+	end
+	local distance = visible / 2 / math.tan(math.rad(camera.FieldOfView / 2))
+	camera.CFrame = CFrame.lookAt(focus + Vector3.new(0, height * 0.03, -distance), focus)
+	camera.Parent = vp
+	vp.CurrentCamera = camera
+	return vp
 end
 
 return UnitModels

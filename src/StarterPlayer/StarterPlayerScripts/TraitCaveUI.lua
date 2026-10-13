@@ -1,8 +1,8 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: TraitCaveUI
--- (replaces the earlier version: lists every unit you own separately, since each copy
---  has its own trait now)
+-- (replaces the earlier version: units show a picture of themselves and traits show their
+--  icons, in the list, the summoning circle and the odds)
 -- The Traits Cave window: pick one of your units, then summon a trait onto it for Trait
 -- Shards (won from levels).
 -- The unit keeps that trait until you summon on it again (the new trait replaces the old).
@@ -15,6 +15,7 @@ local TweenService = game:GetService("TweenService")
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
 local ProgressData = require(ReplicatedStorage:WaitForChild("ProgressData"))
+local UnitModels = require(ReplicatedStorage:WaitForChild("UnitModels"))
 local inventoryRemote = ReplicatedStorage:WaitForChild("InventoryRemote")
 local player = Players.LocalPlayer
 
@@ -255,7 +256,16 @@ local coreGradient = gradient(core, { WHITE, WHITE }, 90)
 -- what sits in the middle of the circle
 local coreScale = Instance.new("UIScale")
 coreScale.Parent = core
-local traitCaption = label(core, "CURRENT TRAIT", UDim2.fromOffset(0, 38), UDim2.new(1, 0, 0, 14), 11, SUBTLE, Enum.Font.GothamBlack)
+-- the trait's icon sits at the top of the circle
+local coreIcon = frame(core, UDim2.new(0.5, -15, 0, 8), UDim2.fromOffset(30, 30), WHITE, 1)
+local function setCoreIcon(traitNameText)
+	for _, c in ipairs(coreIcon:GetChildren()) do
+		c:Destroy()
+	end
+	local icon = traitNameText and TraitData.MakeIcon(traitNameText, 30)
+	if icon then icon.Parent = coreIcon end
+end
+local traitCaption = label(core, "CURRENT TRAIT", UDim2.fromOffset(0, 40), UDim2.new(1, 0, 0, 14), 11, SUBTLE, Enum.Font.GothamBlack)
 local traitName = label(core, "", UDim2.fromOffset(10, 56), UDim2.new(1, -20, 0, 36), 28, WHITE, Enum.Font.GothamBlack)
 traitName.TextScaled = true
 local nameSize = Instance.new("UITextSizeConstraint")
@@ -375,9 +385,10 @@ for i = #TraitData.Tiers, 1, -1 do -- rarest first
 			r.LayoutOrder = row
 			corner(r, 8)
 			stroke(r, tier.Color, 1, 0.7)
-			local mark = diamond(r, 8, tier.Color)
-			mark.Position = UDim2.fromOffset(14, 15)
-			local name = label(r, trait.Name, UDim2.fromOffset(28, 0), UDim2.new(0, 130, 1, 0), 14, tier.Color, Enum.Font.GothamBlack)
+			local icon = TraitData.MakeIcon(trait.Name, 24)
+			icon.Position = UDim2.fromOffset(4, 3)
+			icon.Parent = r
+			local name = label(r, trait.Name, UDim2.fromOffset(32, 0), UDim2.new(0, 126, 1, 0), 14, tier.Color, Enum.Font.GothamBlack)
 			name.TextXAlignment = Enum.TextXAlignment.Left
 			local desc = label(r, TraitData.Describe(trait.Name), UDim2.fromOffset(162, 0), UDim2.new(1, -240, 1, 0), 12, SUBTLE, Enum.Font.Gotham)
 			desc.TextXAlignment = Enum.TextXAlignment.Left
@@ -470,6 +481,7 @@ end
 -- Shows a trait (or "no trait") in the middle of the circle
 local function showTrait(trait)
 	if trait then
+		setCoreIcon(trait.Name)
 		traitName.Text = trait.Name
 		traitName.TextColor3 = trait.Color
 		traitTier.Text = string.upper(trait.Tier) .. "  ·  " .. TraitData.ChanceText(trait.Name)
@@ -477,6 +489,7 @@ local function showTrait(trait)
 		setRingColor(trait.Color)
 		setChips(trait.Name)
 	else
+		setCoreIcon(nil)
 		traitName.Text = selected and "No trait" or "?"
 		traitName.TextColor3 = SUBTLE
 		traitTier.Text = selected and "Summon to give it one" or "Pick a unit"
@@ -537,79 +550,128 @@ end
 
 local refreshUnits -- defined below (rows call it when clicked)
 
-local function makeRow(u, rarity, order)
-	local name, traitName_ = u.Name, u.Trait
-	local isPicked = u.Id == selected
+-- One row per unit, kept between refreshes (keyed by unit id) so each picture is built once
+local rows = {} -- [unitId] = row parts
+
+local function styleRow(row)
+	local isPicked = row.Id == selected
+	row.Button.BackgroundColor3 = isPicked and darker(row.Rarity.Color, 0.55) or Color3.fromRGB(30, 36, 56)
+	row.Button.BackgroundTransparency = isPicked and 0 or 0.2
+	row.Stroke.Color = isPicked and TEAL or row.Rarity.Color
+	row.Stroke.Thickness = isPicked and 2 or 1
+	row.Stroke.Transparency = isPicked and 0 or 0.7
+end
+
+local function createRow(u, rarity)
 	local r = Instance.new("TextButton")
-	r.LayoutOrder = order
 	r.Size = UDim2.new(1, 0, 0, 52)
 	r.Text = ""
 	r.AutoButtonColor = true
-	r.BackgroundColor3 = isPicked and darker(rarity.Color, 0.55) or Color3.fromRGB(30, 36, 56)
-	r.BackgroundTransparency = isPicked and 0 or 0.2
 	r.Parent = unitList
 	corner(r, 10)
-	stroke(r, isPicked and TEAL or rarity.Color, isPicked and 2 or 1, isPicked and 0 or 0.7)
 
-	-- portrait badge with the unit's initials
-	local initials = ""
-	for word in string.gmatch(name, "%a+") do
-		if #initials < 2 then initials ..= string.sub(word, 1, 1) end
-	end
-	local badge = frame(r, UDim2.fromOffset(9, 9), UDim2.fromOffset(34, 34), darker(rarity.Color, 0.45))
-	corner(badge, "round")
-	stroke(badge, rarity.Color, 2)
-	gradient(badge, { WHITE, Color3.fromRGB(170, 170, 170) }, 90)
-	label(badge, string.upper(initials), UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 13, WHITE, Enum.Font.GothamBlack)
+	-- the unit's picture
+	local pic = frame(r, UDim2.fromOffset(7, 6), UDim2.fromOffset(40, 40), darker(rarity.Color, 0.5))
+	corner(pic, 9)
+	pic.ClipsDescendants = true
+	stroke(pic, rarity.Color, 1.5)
+	UnitModels.Portrait(u.Name).Parent = pic
 
-	local n = label(r, name, UDim2.fromOffset(52, 8), UDim2.new(1, -150, 0, 18), 14, WHITE, Enum.Font.GothamBold)
+	local n = label(r, u.Name, UDim2.fromOffset(54, 8), UDim2.new(1, -152, 0, 18), 14, WHITE, Enum.Font.GothamBold)
 	n.TextXAlignment = Enum.TextXAlignment.Left
 	n.TextTruncate = Enum.TextTruncate.AtEnd
-	local rar = label(r, string.format("%s  ·  Lv %d %s", rarity.Name, ProgressData.LevelFromXP(u.XP), string.rep("★", u.Stars)), UDim2.fromOffset(52, 27), UDim2.new(1, -150, 0, 14), 11, rarity.Color, Enum.Font.Gotham)
+	local rar = label(r, "", UDim2.fromOffset(54, 27), UDim2.new(1, -152, 0, 14), 11, rarity.Color, Enum.Font.Gotham)
 	rar.TextXAlignment = Enum.TextXAlignment.Left
 
-	-- trait pill
-	local trait = TraitData.Get(traitName_)
-	local pill = frame(r, UDim2.new(1, -94, 0.5, -11), UDim2.fromOffset(86, 22), trait and darker(trait.Color, 0.7) or Color3.fromRGB(40, 44, 62))
+	-- trait pill: icon + name
+	local pill = frame(r, UDim2.new(1, -94, 0.5, -12), UDim2.fromOffset(88, 24), Color3.fromRGB(40, 44, 62))
 	corner(pill, "round")
-	stroke(pill, trait and trait.Color or DIM, 1, trait and 0.25 or 0.6)
-	local pillText = label(pill, trait and trait.Name or "No trait", UDim2.fromOffset(6, 0), UDim2.new(1, -12, 1, 0), 11,
-		trait and WHITE or DIM, Enum.Font.GothamBlack)
+	local pillStroke = stroke(pill, DIM, 1, 0.6)
+	local pillIcon = frame(pill, UDim2.fromOffset(2, 1), UDim2.fromOffset(22, 22), WHITE, 1)
+	local pillText = label(pill, "", UDim2.fromOffset(26, 0), UDim2.new(1, -30, 1, 0), 11, DIM, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
 	pillText.TextTruncate = Enum.TextTruncate.AtEnd
-	if trait and trait.Tier == "Mythic" then
-		gradient(pill, { WHITE, Color3.fromRGB(255, 200, 230) }, 0)
-	end
 
+	local row = {
+		Id = u.Id, Button = r, Rarity = rarity, Stroke = stroke(r, rarity.Color, 1, 0.7),
+		Info = rar, Pill = pill, PillStroke = pillStroke, PillIcon = pillIcon, PillText = pillText,
+		TraitShown = nil,
+	}
 	r.Activated:Connect(function()
 		if busy then return end
-		selected = u.Id
+		selected = row.Id
 		confirming = false
 		setMessage("")
-		refreshUnits()
+		for _, other in pairs(rows) do
+			styleRow(other)
+		end
 		refreshPicked()
 	end)
+	return row
 end
 
-refreshUnits = function()
-	for _, c in ipairs(unitList:GetChildren()) do
-		if c:IsA("TextButton") or c:IsA("Frame") then c:Destroy() end
+local function updateRow(row, u, order)
+	row.Button.LayoutOrder = order
+	row.Info.Text = string.format("%s  ·  Lv %d %s", row.Rarity.Name, ProgressData.LevelFromXP(u.XP), string.rep("★", u.Stars))
+	if row.TraitShown ~= (u.Trait or false) then
+		row.TraitShown = u.Trait or false
+		for _, c in ipairs(row.PillIcon:GetChildren()) do
+			c:Destroy()
+		end
+		local trait = TraitData.Get(u.Trait)
+		if trait then
+			TraitData.MakeIcon(trait.Name, 22).Parent = row.PillIcon
+			row.Pill.BackgroundColor3 = darker(trait.Color, 0.7)
+			row.PillStroke.Color = trait.Color
+			row.PillStroke.Transparency = 0.25
+			row.PillText.Text = trait.Name
+			row.PillText.TextColor3 = WHITE
+			row.PillText.Position = UDim2.fromOffset(26, 0)
+			row.PillText.Size = UDim2.new(1, -30, 1, 0)
+		else
+			row.Pill.BackgroundColor3 = Color3.fromRGB(40, 44, 62)
+			row.PillStroke.Color = DIM
+			row.PillStroke.Transparency = 0.6
+			row.PillText.Text = "No trait"
+			row.PillText.TextColor3 = DIM
+			row.PillText.Position = UDim2.fromOffset(10, 0)
+			row.PillText.Size = UDim2.new(1, -20, 1, 0)
+		end
 	end
+	styleRow(row)
+end
+
+local emptyNote = nil
+refreshUnits = function()
 	local list, byId = readUnits()
 	if selected and not byId[selected] then
 		selected = nil -- deleted or fused away
 		confirming = false
 	end
 
-	local order, withTrait = 0, 0
-	for _, u in ipairs(list) do
-		order += 1
+	local withTrait = 0
+	for i, u in ipairs(list) do
 		if u.Trait then withTrait += 1 end
-		makeRow(u, UnitData.Rarities[rarityRank[UnitData.UnitRarity[u.Name]]], order)
+		local row = rows[u.Id]
+		if not row then
+			row = createRow(u, UnitData.Rarities[rarityRank[UnitData.UnitRarity[u.Name]]])
+			rows[u.Id] = row
+		end
+		updateRow(row, u, i)
 	end
-	unitsCount.Text = order > 0 and string.format("%d / %d with traits", withTrait, order) or ""
-	if order == 0 then
-		local holder = frame(unitList, UDim2.new(), UDim2.new(1, 0, 0, 70), WHITE, 1)
-		label(holder, "You have no units yet.\nSummon some at the Wishing Fountain!", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 14, SUBTLE, Enum.Font.Gotham)
+	for id, row in pairs(rows) do
+		if not byId[id] then
+			row.Button:Destroy()
+			rows[id] = nil
+		end
+	end
+
+	unitsCount.Text = #list > 0 and string.format("%d / %d with traits", withTrait, #list) or ""
+	if #list == 0 and not emptyNote then
+		emptyNote = frame(unitList, UDim2.new(), UDim2.new(1, 0, 0, 70), WHITE, 1)
+		label(emptyNote, "You have no units yet.\nSummon some at the Wishing Fountain!", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 14, SUBTLE, Enum.Font.Gotham)
+	elseif #list > 0 and emptyNote then
+		emptyNote:Destroy()
+		emptyNote = nil
 	end
 end
 
@@ -636,6 +698,7 @@ local function roulette(result)
 	local steps = 16
 	for i = 1, steps do
 		local t = TraitData.Traits[math.random(1, #TraitData.Traits)]
+		setCoreIcon(t.Name)
 		traitName.Text = t.Name
 		traitName.TextColor3 = t.Color
 		traitTier.Text = string.upper(t.Tier)
