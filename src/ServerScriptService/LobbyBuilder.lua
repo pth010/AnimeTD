@@ -1,15 +1,20 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: LobbyBuilder
--- (replaces the earlier version: adds the Traits Cave, where you summon traits onto your units)
--- Builds the lobby room at runtime:
---   * a 240 x 240 stud square room, 40 studs tall, with walls, roof and ceiling lights
---   * the player spawn near the front wall
+-- (replaces the earlier version: the lobby is an open-air city square instead of a room)
+-- Builds the lobby at runtime:
+--   * a 240 x 240 stud city square under the open sky: tiled paving, a red-brick walkway,
+--     sakura trees, street lamps and benches
+--   * a ring of buildings closing it in (shops with awnings and neon signs, lit windows,
+--     rooftop props), a station building behind the team pads, a torii gate behind the
+--     spawn, corner towers and a skyline of taller towers further back
+--   * invisible walls at the edge of the square so nobody wanders off
+--   * the player spawn near the front (torii) side
 --   * the Wishing Fountain (walk up to it and the summon window pops up) with its own sign
 --   * the Traits Cave across from it (walk inside and the trait summon window pops up)
---   * FIVE team queue pads along the back wall, each with a standing sign board that
+--   * FIVE team queue pads in front of the station, each with a standing sign board that
 --     shows the team name and the live queue status
--- Assumes the default 512x512 Baseplate (the room is centered on the origin).
+-- Assumes the default 512x512 Baseplate (the square is centered on the origin).
 -- If Workspace.Lobby already exists (you built your own), this script does nothing.
 -- A custom lobby needs: Lobby.LobbySpawn, Lobby.SummonAltar (a flat part marking the summon
 -- area), Lobby.TraitCave (a flat part marking the trait summon area), and Lobby.QueuePads
@@ -19,8 +24,7 @@
 if workspace:FindFirstChild("Lobby") then return end
 
 local CENTER = Vector3.new(0, 0, 0)
-local SIZE = 240   -- the room is SIZE x SIZE studs
-local HEIGHT = 40
+local SIZE = 240   -- the city square is SIZE x SIZE studs
 local NUM_PADS = 5
 local MAX_PLAYERS = 4 -- only used for the starting sign text
 
@@ -37,7 +41,7 @@ local half = SIZE / 2
 local lobby = Instance.new("Folder")
 lobby.Name = "Lobby"
 local roomFolder = Instance.new("Folder")
-roomFolder.Name = "Room"
+roomFolder.Name = "City"
 roomFolder.Parent = lobby
 local padsFolder = Instance.new("Folder")
 padsFolder.Name = "QueuePads"
@@ -134,41 +138,317 @@ local function makeSignBoard(parent, name, position, accent, title, body, facing
 	return board, label
 end
 
--- ===== The room =====
-local wallColor = Color3.fromRGB(45, 45, 78)
+-- ===== The city square =====
+-- Everything is built from a fixed random seed, so the city looks the same every time.
+local cityRng = Random.new(2024)
+local EDGE = half          -- the square runs from -EDGE to +EDGE on X and Z
+local STREET = EDGE + 4    -- the buildings' front faces stand here
 
-makePart(roomFolder, "Floor", Vector3.new(SIZE, 0.4, SIZE), CENTER + Vector3.new(0, 0.2, 0), Color3.fromRGB(55, 55, 90))
--- a lighter strip leading from the spawn to the pads
-makePart(roomFolder, "Walkway", Vector3.new(24, 0.1, 170), CENTER + Vector3.new(0, 0.42, 5), Color3.fromRGB(75, 75, 120))
+local PAVING = Color3.fromRGB(205, 198, 186)
+local PAVING_DARK = Color3.fromRGB(176, 168, 156)
+local BRICK = Color3.fromRGB(170, 82, 66)
+local SAKURA = Color3.fromRGB(255, 183, 213)
 
-makePart(roomFolder, "BackWall",  Vector3.new(SIZE + 4, HEIGHT, 2), CENTER + Vector3.new(0, HEIGHT / 2, -half - 1), wallColor)
-makePart(roomFolder, "FrontWall", Vector3.new(SIZE + 4, HEIGHT, 2), CENTER + Vector3.new(0, HEIGHT / 2, half + 1), wallColor)
-makePart(roomFolder, "LeftWall",  Vector3.new(2, HEIGHT, SIZE), CENTER + Vector3.new(-half - 1, HEIGHT / 2, 0), wallColor)
-makePart(roomFolder, "RightWall", Vector3.new(2, HEIGHT, SIZE), CENTER + Vector3.new(half + 1, HEIGHT / 2, 0), wallColor)
-makePart(roomFolder, "Roof", Vector3.new(SIZE + 4, 2, SIZE + 4), CENTER + Vector3.new(0, HEIGHT + 1, 0), Color3.fromRGB(30, 30, 55))
+-- Paving, with a big two-tone tile pattern
+makePart(roomFolder, "Floor", Vector3.new(SIZE, 0.4, SIZE), CENTER + Vector3.new(0, 0.2, 0), PAVING, Enum.Material.Slate)
+local TILE = 24
+for ix = 0, SIZE / TILE - 1 do
+	for iz = 0, SIZE / TILE - 1 do
+		if (ix + iz) % 2 == 0 then
+			local tile = makePart(roomFolder, "Tile", Vector3.new(TILE, 0.05, TILE),
+				CENTER + Vector3.new(-EDGE + TILE * (ix + 0.5), 0.425, -EDGE + TILE * (iz + 0.5)), PAVING_DARK, Enum.Material.Slate)
+			tile.CanCollide = false
+		end
+	end
+end
+-- red-brick walkway from the spawn to the pads, and a cross path to the fountain and the cave
+makePart(roomFolder, "Walkway", Vector3.new(24, 0.1, 170), CENTER + Vector3.new(0, 0.5, 5), BRICK, Enum.Material.Brick)
+makePart(roomFolder, "CrossPath", Vector3.new(140, 0.1, 14), CENTER + Vector3.new(0, 0.47, 58), BRICK, Enum.Material.Brick)
+-- a lighter sidewalk band around the edge
+for _, side in ipairs({ { Vector3.new(SIZE, 0.1, 8), Vector3.new(0, 0, EDGE - 4) }, { Vector3.new(SIZE, 0.1, 8), Vector3.new(0, 0, -EDGE + 4) },
+	{ Vector3.new(8, 0.1, SIZE - 16), Vector3.new(EDGE - 4, 0, 0) }, { Vector3.new(8, 0.1, SIZE - 16), Vector3.new(-EDGE + 4, 0, 0) } }) do
+	makePart(roomFolder, "Sidewalk", side[1], CENTER + side[2] + Vector3.new(0, 0.48, 0), Color3.fromRGB(225, 220, 212), Enum.Material.Concrete)
+end
 
--- Corner pillars
+-- Invisible walls at the edge of the square (the gaps between buildings are open)
+for _, wall in ipairs({ { Vector3.new(SIZE + 8, 120, 2), Vector3.new(0, 60, EDGE + 2) }, { Vector3.new(SIZE + 8, 120, 2), Vector3.new(0, 60, -EDGE - 2) },
+	{ Vector3.new(2, 120, SIZE + 8), Vector3.new(EDGE + 2, 60, 0) }, { Vector3.new(2, 120, SIZE + 8), Vector3.new(-EDGE - 2, 60, 0) } }) do
+	local w = makePart(roomFolder, "Boundary", wall[1], CENTER + wall[2], Color3.new(1, 1, 1))
+	w.Transparency = 1
+end
+
+-- A grid of windows painted on one face of a part (lit warm yellow or dark blue)
+local function windows(part, face, widthStuds, heightStuds, bottomGap, topGap)
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = face
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 8
+	gui.LightInfluence = 0.3
+	gui.Parent = part
+	local cols = math.max(1, math.floor(widthStuds / 6))
+	local rows = math.max(1, math.floor((heightStuds - bottomGap - topGap) / 7))
+	for r = 1, rows do
+		for c = 1, cols do
+			local lit = cityRng:NextNumber() < 0.45
+			local win = Instance.new("Frame")
+			win.BorderSizePixel = 0
+			win.AnchorPoint = Vector2.new(0.5, 0.5)
+			win.Size = UDim2.fromScale(0.55 / cols, 3.6 / heightStuds)
+			win.Position = UDim2.fromScale((c - 0.5) / cols, (topGap + (r - 0.5) * 7) / heightStuds)
+			win.BackgroundColor3 = lit and Color3.fromRGB(255, 222, 150) or Color3.fromRGB(46, 62, 92)
+			win.Parent = gui
+		end
+	end
+end
+
+-- Big text painted on one face of a part
+local function signText(part, face, text, color, font)
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = face
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 25
+	gui.LightInfluence = 0
+	gui.Parent = part
+	local l = Instance.new("TextLabel")
+	l.Size = UDim2.fromScale(1, 1)
+	l.BackgroundTransparency = 1
+	l.Text = text
+	l.TextColor3 = color
+	l.Font = font or Enum.Font.FredokaOne
+	l.TextScaled = true
+	l.Parent = gui
+	local pad = Instance.new("UIPadding")
+	pad.PaddingTop = UDim.new(0.12, 0)
+	pad.PaddingBottom = UDim.new(0.12, 0)
+	pad.PaddingLeft = UDim.new(0.04, 0)
+	pad.PaddingRight = UDim.new(0.04, 0)
+	pad.Parent = l
+	return l
+end
+
+local BUILDING_COLORS = {
+	Color3.fromRGB(242, 226, 200), Color3.fromRGB(232, 168, 150), Color3.fromRGB(150, 196, 200),
+	Color3.fromRGB(196, 178, 222), Color3.fromRGB(176, 110, 90), Color3.fromRGB(226, 206, 140),
+	Color3.fromRGB(130, 150, 182), Color3.fromRGB(214, 140, 160),
+}
+local ACCENTS = {
+	Color3.fromRGB(235, 70, 70), Color3.fromRGB(60, 150, 230), Color3.fromRGB(70, 190, 120),
+	Color3.fromRGB(250, 180, 50), Color3.fromRGB(160, 90, 230), Color3.fromRGB(240, 110, 170),
+}
+local SHOPS = { "RAMEN", "ARCADE", "MANGA", "CAFE", "BOBA", "SUSHI", "GAMES", "BAKERY", "DOJO", "FLOWERS", "KARAOKE", "TOYS" }
+local VERTICAL_SIGNS = { "SAKURA", "HOTEL", "NEON", "TOKYO", "ANIME", "MOCHI" }
+local shopIndex, vertIndex = 0, 0
+
+-- One city building with its front facing the square.
+--   frontCenter: the middle of the bottom edge of its front face; facing: toward the square
+local function building(frontCenter, facing, width, depth, height, opts)
+	opts = opts or {}
+	local color = opts.Color or BUILDING_COLORS[cityRng:NextInteger(1, #BUILDING_COLORS)]
+	local accent = ACCENTS[cityRng:NextInteger(1, #ACCENTS)]
+	-- local frame: -Z (Front) points at the square, the origin at the front-bottom-middle
+	local base = CFrame.lookAt(frontCenter, frontCenter + facing)
+
+	local body = makePart(roomFolder, "Building", Vector3.new(width, height, depth), frontCenter, color, Enum.Material.SmoothPlastic)
+	body.CFrame = base * CFrame.new(0, height / 2, depth / 2)
+	local shopFloor = opts.Shop ~= false and 10 or 0
+	windows(body, Enum.NormalId.Front, width, height, shopFloor + 2, 3)
+
+	-- roof lip and rooftop props
+	local lip = makePart(roomFolder, "RoofLip", Vector3.new(width + 1, 1.2, depth + 1), frontCenter, color:Lerp(Color3.new(0, 0, 0), 0.25))
+	lip.CFrame = base * CFrame.new(0, height + 0.6, depth / 2)
+	if cityRng:NextNumber() < 0.6 then
+		local tank = makePart(roomFolder, "WaterTank", Vector3.new(6, 5, 5), frontCenter, Color3.fromRGB(150, 110, 80), Enum.Material.WoodPlanks)
+		tank.Shape = Enum.PartType.Cylinder
+		tank.CFrame = base * CFrame.new(cityRng:NextNumber(-width / 4, width / 4), height + 4.2, depth * 0.6) * CFrame.Angles(0, 0, math.rad(90))
+	end
+	for _ = 1, cityRng:NextInteger(0, 2) do
+		local ac = makePart(roomFolder, "AirCon", Vector3.new(3, 2, 3), frontCenter, Color3.fromRGB(190, 192, 198), Enum.Material.Metal)
+		ac.CFrame = base * CFrame.new(cityRng:NextNumber(-width / 3, width / 3), height + 2.2, cityRng:NextNumber(4, depth - 4))
+	end
+
+	if opts.Shop ~= false then
+		-- the shop front: glass, an awning in the accent color and a lit sign
+		local glass = makePart(roomFolder, "ShopWindow", Vector3.new(width - 4, 6, 0.3), frontCenter, Color3.fromRGB(150, 200, 230), Enum.Material.Glass)
+		glass.Transparency = 0.35
+		glass.CFrame = base * CFrame.new(0, 3.6, -0.1)
+		local awning = makePart(roomFolder, "Awning", Vector3.new(width - 2, 0.4, 4.5), frontCenter, accent, Enum.Material.Fabric)
+		awning.CFrame = base * CFrame.new(0, 8, -2) * CFrame.Angles(math.rad(-16), 0, 0)
+		shopIndex += 1
+		local sign = makePart(roomFolder, "ShopSign", Vector3.new(math.min(width - 4, 18), 2.6, 0.4), frontCenter, Color3.fromRGB(30, 26, 40))
+		sign.CFrame = base * CFrame.new(0, 10.6, -0.3)
+		signText(sign, Enum.NormalId.Front, SHOPS[(shopIndex - 1) % #SHOPS + 1], accent:Lerp(Color3.new(1, 1, 1), 0.35))
+		-- paper lanterns at the awning's corners
+		for _, sx in ipairs({ -1, 1 }) do
+			local lantern = makePart(roomFolder, "Lantern", Vector3.new(1.4, 1.8, 1.4), frontCenter, Color3.fromRGB(235, 70, 60), Enum.Material.Neon)
+			lantern.Shape = Enum.PartType.Ball
+			lantern.CanCollide = false
+			lantern.CFrame = base * CFrame.new(sx * (width / 2 - 2), 6.4, -4.2)
+		end
+	end
+
+	-- some buildings get a tall vertical neon sign on one edge
+	if opts.Vertical or (opts.Vertical == nil and height > 40 and cityRng:NextNumber() < 0.5) then
+		vertIndex += 1
+		local word = VERTICAL_SIGNS[(vertIndex - 1) % #VERTICAL_SIGNS + 1]
+		local tall = makePart(roomFolder, "VerticalSign", Vector3.new(3, #word * 3 + 2, 0.8), frontCenter, Color3.fromRGB(28, 22, 40))
+		tall.CFrame = base * CFrame.new((width / 2 - 2.5) * (vertIndex % 2 == 0 and 1 or -1), 14 + (#word * 3 + 2) / 2, -1.2)
+		signText(tall, Enum.NormalId.Front, table.concat(string.split(word, ""), "\n"), accent:Lerp(Color3.new(1, 1, 1), 0.2), Enum.Font.GothamBlack)
+	end
+	return body
+end
+
+-- A row of buildings along one side, skipping the gaps listed in `skip` ({ from, to } along the row)
+local function buildingRow(origin, along, facing, from, to, skip, depth)
+	local pos = from
+	while pos < to - 6 do
+		local width = math.min(cityRng:NextInteger(20, 32), to - pos)
+		local blocked = false
+		for _, gap in ipairs(skip or {}) do
+			if pos + width > gap[1] and pos < gap[2] then
+				if gap[1] - pos >= 12 then
+					width = gap[1] - pos -- squeeze a narrower building in before the gap
+				else
+					blocked = true
+					pos = gap[2]
+				end
+				break
+			end
+		end
+		if not blocked then
+			local height = cityRng:NextInteger(26, 64)
+			building(origin + along * (pos + width / 2), facing, width - 0.6, depth or 30, height)
+			pos += width
+		end
+	end
+end
+
+-- back side (behind the pads): the station in the middle, shops either side
+local STATION_W = 190 -- wide enough for all five team banners (pads at x = -80 .. 80)
+local station = building(CENTER + Vector3.new(0, 0, -STREET), Vector3.zAxis, STATION_W, 34, 46,
+	{ Shop = false, Vertical = false, Color = Color3.fromRGB(70, 74, 108) })
+station.Name = "Station"
+buildingRow(CENTER + Vector3.new(0, 0, -STREET), Vector3.xAxis, Vector3.zAxis, -EDGE - 8, EDGE + 8, { { -STATION_W / 2, STATION_W / 2 } })
+-- front side (behind the spawn): a gap for the torii gate in the middle
+buildingRow(CENTER + Vector3.new(0, 0, STREET), Vector3.xAxis, -Vector3.zAxis, -EDGE - 8, EDGE + 8, { { -18, 18 } })
+-- left and right sides
+buildingRow(CENTER + Vector3.new(-STREET, 0, 0), Vector3.zAxis, Vector3.xAxis, -EDGE + 8, EDGE - 8)
+buildingRow(CENTER + Vector3.new(STREET, 0, 0), Vector3.zAxis, -Vector3.xAxis, -EDGE + 8, EDGE - 8)
+
+-- tall towers in the four corners
 for _, sx in ipairs({ -1, 1 }) do
 	for _, sz in ipairs({ -1, 1 }) do
-		makePart(roomFolder, "Pillar", Vector3.new(7, HEIGHT, 7), CENTER + Vector3.new(sx * (half - 4), HEIGHT / 2, sz * (half - 4)), Color3.fromRGB(65, 65, 105))
+		local corner = CENTER + Vector3.new(sx * (STREET + 8), 0, sz * (STREET + 8))
+		local toSquare = Vector3.new(-sx, 0, -sz).Unit
+		building(corner - toSquare * 2, toSquare, 30, 30, cityRng:NextInteger(85, 110), { Shop = false, Vertical = true })
 	end
 end
 
--- Ceiling lights (4 x 4) so the room isn't dark
-for _, x in ipairs({ -90, -30, 30, 90 }) do
-	for _, z in ipairs({ -90, -30, 30, 90 }) do
-		local lamp = makePart(roomFolder, "CeilingLight", Vector3.new(12, 0.5, 12), CENTER + Vector3.new(x, HEIGHT - 0.25, z), Color3.fromRGB(255, 245, 220), Enum.Material.Neon)
-		lamp.CanCollide = false
-		local light = Instance.new("PointLight")
-		light.Range = 90
-		light.Brightness = 1.2
-		light.Color = Color3.fromRGB(255, 245, 225)
-		light.Parent = lamp
+-- a skyline of taller towers further back, for depth
+for side = 1, 4 do
+	local dir = ({ Vector3.zAxis, -Vector3.zAxis, Vector3.xAxis, -Vector3.xAxis })[side]
+	local along = math.abs(dir.Z) > 0 and Vector3.xAxis or Vector3.zAxis
+	for i = -2, 2 do
+		local width = cityRng:NextInteger(30, 46)
+		local front = CENTER + dir * cityRng:NextInteger(185, 215) + along * (i * 62 + cityRng:NextInteger(-10, 10))
+		local tower = makePart(roomFolder, "SkylineTower", Vector3.new(width, 1, width), front, Color3.new(1, 1, 1))
+		local height = cityRng:NextInteger(110, 190)
+		tower.Size = Vector3.new(width, height, width)
+		tower.Color = Color3.fromRGB(96, 108, 140):Lerp(Color3.fromRGB(150, 160, 190), cityRng:NextNumber())
+		tower.CFrame = CFrame.lookAt(front, front - dir) * CFrame.new(0, height / 2, width / 2)
+		windows(tower, Enum.NormalId.Front, width, height, 4, 4)
 	end
 end
 
--- Banner on the back wall (a fixed panel, not floating text)
-local banner = makePart(roomFolder, "Banner", Vector3.new(110, 12, 1), CENTER + Vector3.new(0, 30, -half + 0.5), Color3.fromRGB(28, 28, 44))
+-- Torii gate behind the spawn (in the gap of the front row)
+do
+	local RED = Color3.fromRGB(205, 45, 40)
+	local gateZ = EDGE - 6
+	for _, sx in ipairs({ -1, 1 }) do
+		local post = makePart(roomFolder, "ToriiPost", Vector3.new(2.6, 22, 2.6), CENTER + Vector3.new(sx * 13, 11, gateZ), RED, Enum.Material.Wood)
+		post.Shape = Enum.PartType.Block
+		makePart(roomFolder, "ToriiFoot", Vector3.new(3.4, 1.4, 3.4), CENTER + Vector3.new(sx * 13, 0.9, gateZ), Color3.fromRGB(40, 36, 40))
+	end
+	makePart(roomFolder, "ToriiTopBeam", Vector3.new(36, 2.2, 3.4), CENTER + Vector3.new(0, 23, gateZ), Color3.fromRGB(40, 36, 40), Enum.Material.Wood)
+	makePart(roomFolder, "ToriiBeam", Vector3.new(32, 1.8, 2.2), CENTER + Vector3.new(0, 18.5, gateZ), RED, Enum.Material.Wood)
+	local plaque = makePart(roomFolder, "ToriiPlaque", Vector3.new(6, 4, 0.6), CENTER + Vector3.new(0, 20.8, gateZ), Color3.fromRGB(40, 36, 40))
+	signText(plaque, Enum.NormalId.Back, "ANIME\nTD", Color3.fromRGB(255, 215, 120), Enum.Font.GothamBlack)
+end
+
+-- Sakura trees in round planters
+local function sakuraTree(x, z, scale)
+	scale = scale or 1
+	local pos = CENTER + Vector3.new(x, 0, z)
+	local planter = makePart(roomFolder, "Planter", Vector3.new(1.6, 9 * scale, 9 * scale), pos, Color3.fromRGB(150, 140, 130), Enum.Material.Concrete)
+	planter.Shape = Enum.PartType.Cylinder
+	planter.CFrame = CFrame.new(pos + Vector3.new(0, 0.8, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	local trunk = makePart(roomFolder, "Trunk", Vector3.new(1.4 * scale, 9 * scale, 1.4 * scale), pos + Vector3.new(0, 4.5 * scale + 1, 0),
+		Color3.fromRGB(100, 70, 60), Enum.Material.Wood)
+	trunk.CFrame = trunk.CFrame * CFrame.Angles(0, 0, math.rad(cityRng:NextNumber(-6, 6)))
+	for i = 1, 4 do
+		local blossom = makePart(roomFolder, "Blossom", Vector3.one * (cityRng:NextNumber(6, 8.5) * scale),
+			pos + Vector3.new(cityRng:NextNumber(-2.6, 2.6) * scale, (9.5 + cityRng:NextNumber(-1, 1.5)) * scale + 1, cityRng:NextNumber(-2.6, 2.6) * scale),
+			SAKURA:Lerp(Color3.new(1, 1, 1), cityRng:NextNumber(0, 0.3)), Enum.Material.Grass)
+		blossom.Shape = Enum.PartType.Ball
+		blossom.CanCollide = i == 1
+	end
+	local petals = Instance.new("ParticleEmitter")
+	petals.Color = ColorSequence.new(SAKURA)
+	petals.Size = NumberSequence.new(0.25)
+	petals.Lifetime = NumberRange.new(4, 6)
+	petals.Rate = 2
+	petals.Speed = NumberRange.new(0.5, 1.5)
+	petals.Acceleration = Vector3.new(0.6, -1.2, 0.3)
+	petals.RotSpeed = NumberRange.new(-90, 90)
+	petals.SpreadAngle = Vector2.new(180, 180)
+	petals.Parent = trunk
+end
+for _, t in ipairs({
+	{ -104, 104 }, { 104, 104 }, { -104, -104 }, { 104, -104 },
+	{ -106, -20 }, { -106, -45 }, { 106, -20 }, { 106, -45 },
+	{ -40, 106 }, { 40, 106 },
+}) do
+	sakuraTree(t[1], t[2], 1)
+end
+
+-- Street lamps along the walkway
+local function streetLamp(x, z)
+	local pos = CENTER + Vector3.new(x, 0, z)
+	makePart(roomFolder, "LampPost", Vector3.new(0.6, 12, 0.6), pos + Vector3.new(0, 6, 0), Color3.fromRGB(45, 45, 55), Enum.Material.Metal)
+	makePart(roomFolder, "LampArm", Vector3.new(2.4, 0.4, 0.4), pos + Vector3.new(0, 12, 0), Color3.fromRGB(45, 45, 55), Enum.Material.Metal)
+	local bulb = makePart(roomFolder, "LampLight", Vector3.new(1.4, 1.4, 1.4), pos + Vector3.new(0, 12.9, 0), Color3.fromRGB(255, 232, 180), Enum.Material.Neon)
+	bulb.Shape = Enum.PartType.Ball
+	bulb.CanCollide = false
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(255, 225, 170)
+	light.Range = 24
+	light.Brightness = 1.2
+	light.Parent = bulb
+end
+for _, z in ipairs({ 72, 30, -10, -42 }) do
+	streetLamp(-16, z)
+	streetLamp(16, z)
+end
+
+-- Benches facing the walkway
+local function bench(x, z, facingX)
+	local pos = CENTER + Vector3.new(x, 0, z)
+	local cf = CFrame.lookAt(pos, pos + Vector3.new(facingX, 0, 0))
+	local seat = makePart(roomFolder, "BenchSeat", Vector3.new(6, 0.5, 2), pos, Color3.fromRGB(150, 100, 60), Enum.Material.WoodPlanks)
+	seat.CFrame = cf * CFrame.new(0, 1.8, 0)
+	local back = makePart(roomFolder, "BenchBack", Vector3.new(6, 1.6, 0.4), pos, Color3.fromRGB(150, 100, 60), Enum.Material.WoodPlanks)
+	back.CFrame = cf * CFrame.new(0, 2.9, 0.9)
+	for _, sx in ipairs({ -2.4, 2.4 }) do
+		local leg = makePart(roomFolder, "BenchLeg", Vector3.new(0.4, 1.6, 1.8), pos, Color3.fromRGB(45, 45, 55), Enum.Material.Metal)
+		leg.CFrame = cf * CFrame.new(sx, 0.8, 0)
+	end
+end
+for _, z in ipairs({ 50, 12, -26 }) do
+	bench(-22, z, 1)
+	bench(22, z, -1)
+end
+
+-- Banner on the station's front (a fixed panel, not floating text)
+local banner = makePart(roomFolder, "Banner", Vector3.new(110, 12, 1), CENTER + Vector3.new(0, 34, -STREET + 0.6), Color3.fromRGB(28, 28, 44))
 do
 	local gui = Instance.new("SurfaceGui")
 	gui.Face = Enum.NormalId.Back
@@ -496,7 +776,7 @@ local caveToSpawn = Vector3.new(spawn.Position.X - caveSignPos.X, 0, spawn.Posit
 makeSignBoard(lobby, "TraitCaveSign", caveSignPos, CAVE_CRYSTALS[1], "TRAITS CAVE",
 	"Walk inside to summon traits onto your units!", caveToSpawn, 13)
 
--- ===== Five team queue pads (back wall) =====
+-- ===== Five team queue pads (in front of the station) =====
 for i = 1, NUM_PADS do
 	local color = TEAM_COLORS[i]
 	local x = (i - (NUM_PADS + 1) / 2) * 40 -- -80, -40, 0, 40, 80
@@ -511,8 +791,8 @@ for i = 1, NUM_PADS do
 	makeSignBoard(padsFolder, "Sign" .. i, CENTER + Vector3.new(x, 0, -92), color, "TEAM " .. i,
 		string.format("Step here to queue\n0/%d", MAX_PLAYERS))
 
-	-- a colored stripe on the back wall behind each team
-	makePart(roomFolder, "PadStripe" .. i, Vector3.new(22, 14, 0.4), CENTER + Vector3.new(x, 7.4, -half + 0.2), color, Enum.Material.Neon)
+	-- a hanging team banner on the station's front behind each pad
+	makePart(roomFolder, "PadStripe" .. i, Vector3.new(16, 22, 0.4), CENTER + Vector3.new(x, 15, -(half + 4) + 0.3), color, Enum.Material.Neon)
 end
 
 lobby.Parent = workspace
