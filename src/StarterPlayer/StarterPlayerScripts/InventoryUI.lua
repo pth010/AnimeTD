@@ -1,8 +1,10 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: InventoryUI
--- (replaces the earlier version: adds the team bar along the bottom of the lobby screen.
---  "Put on team" asks you to click the slot to put the unit in.)
+-- (replaces the earlier version: the team bar hides while the level select, summon or
+--  Traits Cave window is open, so it can't cover their buttons)
+-- The team bar runs along the bottom of the lobby screen. "Put on team" asks you to click
+-- the slot to put the unit in.
 -- Every unit is its own slot in the grid, with its own trait, level, stars and lock. Click a
 -- unit to see it on the right and lock, equip, fuse, evolve or delete it. The top shows
 -- how many of your slots are used.
@@ -289,6 +291,7 @@ local confirmEvolve = false
 local openFuse, askDelete -- set further down
 local refreshTeamBar, startPicking -- the team bar, further down
 local rebuild -- defined at the bottom
+local barCovered -- defined at the bottom
 
 local function readState()
 	units, byId = UnitData.ParseUnits(player:GetAttribute("Units"))
@@ -1061,10 +1064,28 @@ closeBtn.Activated:Connect(function()
 end)
 
 -- Lobby only
+-- Other windows the team bar must never cover (it's drawn above them). Each of these
+-- ScreenGuis has one window frame; the bar hides while any of them is showing.
+local COVERING_GUIS = { "LevelSelectGui", "GachaGui", "TraitCaveGui", "SummonRevealGui", "ResultsGui" }
+local playerGui = player:WaitForChild("PlayerGui")
+barCovered = function()
+	for _, name in ipairs(COVERING_GUIS) do
+		local other = playerGui:FindFirstChild(name)
+		if other and other:IsA("ScreenGui") and other.Enabled then
+			for _, child in ipairs(other:GetChildren()) do
+				if child:IsA("GuiObject") and child.Visible then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+
 local function updateVisibility()
 	local inMatch = player:GetAttribute("InMatch") == true
 	openBtn.Visible = not inMatch
-	barGui.Enabled = not inMatch -- the match has its own hotbar
+	barGui.Enabled = not inMatch and not barCovered() -- the match has its own hotbar
 	if inMatch and pickingId then
 		pickingId = nil
 		refreshTeamBar()
@@ -1077,3 +1098,18 @@ local function updateVisibility()
 end
 updateVisibility()
 player:GetAttributeChangedSignal("InMatch"):Connect(updateVisibility)
+
+-- those windows open and close on their own (walking onto pads, the fountain, the cave)
+task.spawn(function()
+	while true do
+		task.wait(0.25)
+		local shouldShow = player:GetAttribute("InMatch") ~= true and not barCovered()
+		if barGui.Enabled ~= shouldShow then
+			if not shouldShow and pickingId then
+				pickingId = nil
+				refreshTeamBar()
+			end
+			barGui.Enabled = shouldShow
+		end
+	end
+end)
