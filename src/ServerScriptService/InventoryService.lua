@@ -1,7 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: InventoryService
--- (replaces the earlier version: adds "EquipSlot", putting a unit into a chosen team slot)
+-- (replaces the earlier version: adds "SaveLayout" for the Screen Layout panel)
 -- Handles every button in the inventory and the Traits Cave. The server checks everything,
 -- so a locked unit can never be deleted by a hacked client.
 
@@ -23,6 +23,7 @@ remote.Parent = ReplicatedStorage
 --   "SummonTrait", unitId                   (Traits Cave: replaces the unit's trait, costs Trait Shards)
 --   "Fuse",        targetId,   { unitId, ... }   (feeds those units in for XP)
 --   "Evolve",      unitId                   (uses spare copies + Gold, see ProgressData)
+--   "SaveLayout",  { [element] = { X, Y, S } }  (Screen Layout panel, see LayoutUI)
 
 -- Turns a client-sent list into a clean list of numbers (or nil)
 local function idList(value)
@@ -67,6 +68,8 @@ remote.OnServerInvoke = function(player, action, a, b)
 		ok, err, xp = PlayerData.Fuse(player, a, ids)
 	elseif action == "Evolve" then
 		ok, err = PlayerData.Evolve(player, a)
+	elseif action == "SaveLayout" then
+		ok, err = PlayerData.SaveLayout(player, a)
 	else
 		return { Success = false, Error = "Unknown action." }
 	end

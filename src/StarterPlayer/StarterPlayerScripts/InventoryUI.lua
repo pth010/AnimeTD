@@ -1,8 +1,10 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: InventoryUI
--- (replaces the earlier version: the team bar stays on screen in matches too, as the unit
---  hotbar: click a slot (or press 1-6) to place that unit; slots show cost and placed/limit)
+-- (replaces the earlier version: the team bar and Inventory button can be moved and resized
+--  in the Screen Layout panel, see LayoutUI)
+-- The team bar stays on screen in matches too, as the unit hotbar: click a slot (or press
+-- 1-6) to place that unit; slots show cost and placed/limit.
 -- The team bar runs along the bottom of the screen. In the lobby, "Put on team" asks you to
 -- click the slot to put the unit in. It hides while the level select, summon or Traits Cave
 -- window is open, so it can't cover their buttons.
@@ -120,6 +122,7 @@ gui.Parent = player:WaitForChild("PlayerGui")
 
 -- Open button (left side of the screen)
 local openBtn = button(gui, "Inventory", UDim2.new(0, 10, 0.5, -20), UDim2.fromOffset(130, 40), Color3.fromRGB(70, 110, 220), 18)
+openBtn.Name = "InventoryButton" -- LayoutUI finds it by this name
 
 local window = frame(gui, UDim2.fromScale(0.5, 0.5), UDim2.fromOffset(WIDTH, HEIGHT), PANEL)
 window.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -577,22 +580,26 @@ barGui.Parent = player:WaitForChild("PlayerGui")
 local barW = UnitData.TeamSize * SLOT_W + (UnitData.TeamSize - 1) * SLOT_GAP + 20
 local bar = frame(barGui, UDim2.new(0.5, 0, 1, -12), UDim2.fromOffset(barW, SLOT_H + 34), PANEL, 0.15)
 bar.AnchorPoint = Vector2.new(0.5, 1)
+bar.Name = "TeamBar" -- LayoutUI finds it by this name
 corner(bar, 12)
 local barStroke = stroke(bar, WHITE, 1, 0.8)
 local barScale = Instance.new("UIScale")
 barScale.Parent = bar
+-- shrinks to fit narrow screens, times the size picked in the Screen Layout panel
 local function fitBar()
 	local vp = workspace.CurrentCamera.ViewportSize
-	barScale.Scale = math.min(1, (vp.X - 20) / barW)
+	barScale.Scale = math.min(1, (vp.X - 20) / barW) * (bar:GetAttribute("UserScale") or 1)
 end
 fitBar()
 workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(fitBar)
+bar:GetAttributeChangedSignal("UserScale"):Connect(fitBar)
 
 local barTitle = label(bar, "TEAM", UDim2.fromOffset(12, 4), UDim2.new(1, -24, 0, 20), 12, SUBTLE, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
 local barHint = label(bar, "", UDim2.fromOffset(12, 4), UDim2.new(1, -24, 0, 20), 11, DIM, Enum.Font.Gotham, Enum.TextXAlignment.Right)
 
 -- the "pick a slot" banner that appears above the bar
-local pickBanner = frame(barGui, UDim2.new(0.5, 0, 1, -(SLOT_H + 56)), UDim2.fromOffset(380, 40), Color3.fromRGB(40, 34, 14))
+-- (a child of the bar, so it moves and resizes along with it)
+local pickBanner = frame(bar, UDim2.new(0.5, 0, 0, -10), UDim2.fromOffset(380, 40), Color3.fromRGB(40, 34, 14))
 pickBanner.AnchorPoint = Vector2.new(0.5, 1)
 pickBanner.Visible = false
 corner(pickBanner, 10)

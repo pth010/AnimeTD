@@ -4,7 +4,8 @@
 -- (replaces the earlier version: every unit is now its own entry with its own trait, level,
 --  stars and lock, and the inventory has slots (100 to start, more from game passes).
 --  Old saves are converted automatically: a stack of 3 becomes 3 separate units.
---  Units can be put into a chosen team slot, see PlayerData.EquipToSlot.)
+--  Units can be put into a chosen team slot, see PlayerData.EquipToSlot. Each player's screen
+--  layout (where the team bar, Inventory button and currency counter sit) is saved too.)
 --
 -- Single source of truth for each player's gems, gold, trait shards, pity, units, locks,
 -- team and settings.
@@ -47,6 +48,29 @@ end
 local PlayerData = {}
 PlayerData.Profiles = {}
 
+-- The screen elements players can move in the Screen Layout panel, and how far they can go
+PlayerData.LayoutElements = { TeamBar = true, InventoryButton = true, Currency = true }
+local LAYOUT_MOVE_LIMIT = 0.5          -- up to half a screen in any direction
+local LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX = 0.6, 1.6
+
+local function cleanLayout(t)
+	local out = {}
+	if type(t) ~= "table" then return out end
+	for key, v in pairs(t) do
+		if PlayerData.LayoutElements[key] and type(v) == "table" then
+			local x, y, s = tonumber(v.X), tonumber(v.Y), tonumber(v.S)
+			if x and y and s then
+				out[key] = {
+					X = math.clamp(x, -LAYOUT_MOVE_LIMIT, LAYOUT_MOVE_LIMIT),
+					Y = math.clamp(y, -LAYOUT_MOVE_LIMIT, LAYOUT_MOVE_LIMIT),
+					S = math.clamp(s, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX),
+				}
+			end
+		end
+	end
+	return out
+end
+
 -- Profile layout:
 --   Units      [id] = { Id, Name, Trait, XP, Stars, Locked }   one entry per unit you own
 --   NextId     the id the next new unit gets
@@ -56,6 +80,8 @@ PlayerData.Profiles = {}
 --   Cleared    [levelId] = true: levels this player has beaten (see LevelData)
 --   BonusSlots extra inventory slots from rewards (saved; game pass slots are checked on join)
 --   PassSlots  slots from owned game passes (not saved, see UnitData.SlotPasses)
+--   UILayout   [element] = { X, Y, S }: how far each screen element is moved (fractions of
+--              the screen) and its size, set in the Screen Layout panel (see LayoutUI)
 
 -- ===== Units =====
 local function newUnit(profile, unitName)
@@ -225,6 +251,13 @@ function PlayerData.Sync(player)
 	end
 	table.sort(cleared)
 	player:SetAttribute("ClearedLevels", table.concat(cleared, ",")) -- "1,2"
+
+	local layout = {}
+	for key, v in pairs(profile.UILayout) do
+		table.insert(layout, string.format("%s=%.4f:%.4f:%.4f", key, v.X, v.Y, v.S))
+	end
+	table.sort(layout)
+	player:SetAttribute("UILayout", table.concat(layout, ";")) -- "TeamBar=0.1000:-0.0500:1.2000"
 end
 
 -- ===== Loading =====
@@ -347,6 +380,7 @@ function PlayerData.Load(player)
 		Cleared = {},
 		BonusSlots = 0,
 		PassSlots = 0,
+		UILayout = {},
 		Busy = false,
 		SavePending = false,
 		CanSave = ok, -- never save over a profile we failed to load
@@ -358,6 +392,7 @@ function PlayerData.Load(player)
 		profile.Shards = tonumber(saved.Shards) or STARTING_SHARDS
 		profile.Pity = tonumber(saved.Pity) or 0
 		profile.BonusSlots = cleanNumber(saved.BonusSlots, 0, 100000) or 0
+		profile.UILayout = cleanLayout(saved.UILayout)
 
 		if type(saved.Units) == "table" then
 			if saved.Version == SAVE_VERSION then
@@ -445,6 +480,7 @@ function PlayerData.Save(player)
 				AutoDelete = table.clone(profile.AutoDelete),
 				Cleared = clearedList,
 				BonusSlots = profile.BonusSlots,
+				UILayout = profile.UILayout,
 			}
 		end)
 	end)
@@ -506,6 +542,16 @@ function PlayerData.AddBonusSlots(player, amount)
 	profile.BonusSlots = math.max(0, profile.BonusSlots + amount)
 	PlayerData.Sync(player)
 	PlayerData.RequestSave(player)
+end
+
+-- Saves where the player put their screen elements (from the Screen Layout panel)
+function PlayerData.SaveLayout(player, layout)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	profile.UILayout = cleanLayout(layout)
+	PlayerData.Sync(player)
+	PlayerData.RequestSave(player)
+	return true
 end
 
 -- Records that the player beat a level (unlocks the next one)

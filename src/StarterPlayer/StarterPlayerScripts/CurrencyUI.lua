@@ -1,7 +1,9 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: CurrencyUI
--- (replaces the earlier version: the counter uses the gem, coin and crystal icons from CurrencyIcons)
+-- (replaces the earlier version: the counter can be moved and resized in the Screen Layout
+--  panel, see LayoutUI)
+-- The counter uses the gem, coin and crystal icons from CurrencyIcons.
 -- Shows your Gems, Gold and Trait Shards on the left side of the screen while in the lobby, and a reward
 -- popup when you earn something (e.g. "VICTORY! +375 Gold +75 Gems" after winning a match).
 
@@ -26,6 +28,7 @@ gui.Parent = player:WaitForChild("PlayerGui")
 
 -- ===== Counter (sits just above the Inventory button) =====
 local counter = Instance.new("Frame")
+counter.Name = "Counter" -- LayoutUI finds it by this name
 counter.Position = UDim2.new(0, 10, 0.5, -146)
 counter.Size = UDim2.fromOffset(130, 118)
 counter.BackgroundColor3 = PANEL
