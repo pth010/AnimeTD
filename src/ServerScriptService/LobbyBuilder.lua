@@ -1,8 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: LobbyBuilder
--- (replaces the earlier version: a night sky over the lobby, deeper colors and green lawns.
---  Matches stay in daylight: PlacementUI switches each player's lighting to day in a match.)
+-- (replaces the earlier version: does nothing in the match place, see PlaceConfig)
 -- Builds the lobby at runtime:
 --   * a 240 x 240 stud city square under the open sky: tiled paving, a red-brick walkway,
 --     sakura trees, street lamps and benches
@@ -31,6 +30,7 @@
 -- SurfaceGui named QueueGui with a TextLabel named Label inside).
 
 if workspace:FindFirstChild("Lobby") then return end
+if require(game:GetService("ReplicatedStorage"):WaitForChild("PlaceConfig")).IsMatchPlace() then return end
 
 local CENTER = Vector3.new(0, 0, 0)
 local SIZE = 240   -- the city square is SIZE x SIZE studs

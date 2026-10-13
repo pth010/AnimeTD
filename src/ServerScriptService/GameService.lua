@@ -1,8 +1,10 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: enemy health bars never get smaller than a readable size on
---  screen; up close they still scale with the enemy)
+-- (replaces the earlier version: works in both places. In the lobby the pads send each team
+--  to its own match server (see MatchTeleport). In the match place it plays the level the
+--  lobby picked, then sends everyone back. In Studio, or while PlaceConfig.MatchPlaceId is
+--  0, matches still run in the lobby's sky arenas like before.)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -19,17 +21,22 @@ local LevelData = require(ReplicatedStorage:WaitForChild("LevelData"))
 local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
 local ProgressData = require(ReplicatedStorage:WaitForChild("ProgressData"))
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
+local PlaceConfig = require(ReplicatedStorage:WaitForChild("PlaceConfig"))
+local MatchTeleport = require(ServerScriptService:WaitForChild("MatchTeleport"))
 
-local arenasFolder = workspace:WaitForChild("Arenas")
-local lobbyFolder = workspace:WaitForChild("Lobby")
-local padsFolder = lobbyFolder:WaitForChild("QueuePads")
-local lobbySpawn = lobbyFolder:WaitForChild("LobbySpawn")
+-- Which job this server has (see PlaceConfig):
+--   match server: plays one level for the team the lobby sent here, then sends them back
+--   lobby with match servers: the pads teleport each team to its own match server
+--   lobby without (Studio, or MatchPlaceId still 0): matches run in this server's sky arenas
+local IS_MATCH_SERVER = PlaceConfig.IsMatchPlace()
+local USE_MATCH_SERVERS = PlaceConfig.UsesMatchServers()
 
 -- ===== CONFIG (tweak freely) =====
-local NUM_ARENAS = 5           -- must match the number of pads and arenas
+local NUM_PADS = 5             -- must match the number of pads in the lobby
 local MAX_PLAYERS = 4          -- players per team
 local QUEUE_COUNTDOWN = 10     -- seconds from first player stepping on a pad
 local FULL_COUNTDOWN = 3       -- shortened countdown when a pad is full
+local TEAM_WAIT = 45           -- match server: the longest it waits for the whole team to arrive
 
 -- Waves, start cash, boss timing, enemy strength and win rewards are set per level in LevelData
 local BASE_HEALTH = 20
@@ -62,6 +69,13 @@ local ENEMY_TYPES = {
 	Boss   = { Name = "Demon King",  HealthMult = 8,   SpeedMult = 0.5, RewardMult = 10,  BaseDamage = 10, Size = Vector3.new(5, 7.6, 5),   Bob = 0.15, ShowName = true },
 }
 
+-- The match place has one arena and no lobby; a lobby with match servers has no arenas
+local NUM_ARENAS = IS_MATCH_SERVER and 1 or (USE_MATCH_SERVERS and 0 or NUM_PADS)
+local arenasFolder = NUM_ARENAS > 0 and workspace:WaitForChild("Arenas") or nil
+local lobbyFolder = not IS_MATCH_SERVER and workspace:WaitForChild("Lobby") or nil
+local padsFolder = lobbyFolder and lobbyFolder:WaitForChild("QueuePads")
+local lobbySpawn = lobbyFolder and lobbyFolder:WaitForChild("LobbySpawn")
+
 -- ===== ARENAS =====
 -- Each arena has its own enemies, units, players, state and base health.
 local arenas = {}
@@ -92,8 +106,6 @@ local function createArena(id)
 	placeParams.FilterType = Enum.RaycastFilterType.Include
 	placeParams.FilterDescendantsInstances = { placeable, obstacles }
 
-	local pad = padsFolder:WaitForChild("Pad" .. id)
-
 	return {
 		Id = id,
 		Folder = folder,
@@ -102,21 +114,15 @@ local function createArena(id)
 		UnitFolder = unitFolder,
 		PlaceParams = placeParams,
 		Spawn = folder:WaitForChild("ArenaSpawn"),
-		Pad = pad,
 		Obstacles = obstacles,
-		Label = padsFolder:WaitForChild("Sign" .. id):WaitForChild("QueueGui"):WaitForChild("Label"),
 
 		Enemies = {},
 		Units = {},
 		Players = {},      -- [player] = true
 		State = "Waiting", -- Waiting, Intermission, Playing, Over
-		Running = false,
-		Countdown = nil,
 		Clock = 0,         -- match time, runs faster at higher speeds (unit cooldowns use it)
 		Stats = {},        -- [userId] = { Name, Damage, Kills, Gems } for the results screen
 		Votes = {},        -- [player] = "Again" on the results screen
-		Host = nil,        -- the first player on the pad: they pick the level
-		LevelId = nil,     -- the level picked for the next match
 		Level = nil,       -- the level being played right now
 		Attrs = { BaseHealth = BASE_HEALTH, Wave = 0, MaxWave = LevelData.Levels[1].Waves, MatchStatus = "In lobby", MatchSpeed = 1 },
 	}
@@ -125,6 +131,24 @@ end
 for id = 1, NUM_ARENAS do
 	arenas[id] = createArena(id)
 end
+
+-- One queue per pad in the lobby. Without match servers, pad 1 plays in arena 1 and so on.
+local queues = {}
+for id = 1, (IS_MATCH_SERVER and 0 or NUM_PADS) do
+	queues[id] = {
+		Id = id,
+		Pad = padsFolder:WaitForChild("Pad" .. id),
+		Label = padsFolder:WaitForChild("Sign" .. id):WaitForChild("QueueGui"):WaitForChild("Label"),
+		Arena = arenas[id],
+		Running = false,   -- a match from this pad is going on (or the team is teleporting)
+		Countdown = nil,
+		Host = nil,        -- the first player on the pad: they pick the level
+		LevelId = nil,     -- the level picked for the next match
+	}
+end
+
+-- Match server only: what the lobby sent along ({ LevelId, Players = { userIds }, Lobby })
+local matchInfo = nil
 
 -- ===== HELPERS =====
 local function addCash(player, amount)
@@ -853,18 +877,31 @@ speedRemote.OnServerInvoke = function(player, speed)
 end
 
 -- ===== PLAYERS =====
+local onMatchServerJoin -- set further down (MATCH SERVER)
+
 local function onPlayerAdded(player)
-	player:SetAttribute("InMatch", false)
+	-- on a match server you're in the match from the moment you arrive (no lobby screens)
+	player:SetAttribute("InMatch", IS_MATCH_SERVER)
+	if IS_MATCH_SERVER then
+		player:SetAttribute("MatchStatus", "Getting ready...")
+		player:SetAttribute("ArenaId", 1)
+	end
 	task.spawn(checkSpeedPass, player)
 	player.CharacterAdded:Connect(function(char)
-		-- If you die mid-match you respawn in the lobby, so send you back to your arena
-		local arena = playerArena[player]
+		-- If you die mid-match you respawn at the spawn, so send you back to your arena
+		local arena = playerArena[player] or (IS_MATCH_SERVER and arenas[1])
 		if arena then
 			char:WaitForChild("HumanoidRootPart")
 			task.wait(0.1)
 			teleportTo(player, arena.Spawn, 6)
 		end
 	end)
+	if IS_MATCH_SERVER then
+		task.spawn(function()
+			while not onMatchServerJoin do task.wait() end -- defined further down
+			onMatchServerJoin(player)
+		end)
+	end
 end
 Players.PlayerAdded:Connect(onPlayerAdded)
 for _, p in ipairs(Players:GetPlayers()) do
@@ -906,10 +943,30 @@ local function sendToLobby(arena, p)
 	arena.Players[p] = nil
 	arena.Votes[p] = nil
 	playerArena[p] = nil
+	p:SetAttribute("PlacedCounts", "")
+	if IS_MATCH_SERVER then
+		-- the match screen stays up under the "Returning to the lobby" screen until they're gone
+		task.spawn(MatchTeleport.ToLobby, { p }, matchInfo and matchInfo.Lobby)
+		return
+	end
 	p:SetAttribute("InMatch", false)
 	p:SetAttribute("ArenaId", nil)
-	p:SetAttribute("PlacedCounts", "")
 	teleportTo(p, lobbySpawn, 8)
+end
+
+-- Puts a player into the arena's match (with the starting cash) and moves them there
+local function enterArena(arena, p)
+	arena.Players[p] = true
+	playerArena[p] = arena
+	statsFor(arena, p)
+	for name, value in pairs(arena.Attrs) do
+		p:SetAttribute(name, value)
+	end
+	p:SetAttribute("ArenaId", arena.Id)
+	p:SetAttribute("InMatch", true)
+	p:SetAttribute("Cash", arena.Level.StartCash)
+	p:SetAttribute("PlacedCounts", "")
+	teleportTo(p, arena.Spawn, 6)
 end
 
 -- Sends the whole team back to the lobby and resets the arena
@@ -933,16 +990,9 @@ local function playMatch(arena, participants)
 	setMatchAttr(arena, "MaxWave", level.Waves)
 	setMatchAttr(arena, "LevelName", level.Name)
 	for _, p in ipairs(participants) do
-		arena.Players[p] = true
-		playerArena[p] = arena
-		statsFor(arena, p)
-		for name, value in pairs(arena.Attrs) do
-			p:SetAttribute(name, value)
+		if p.Parent then
+			enterArena(arena, p)
 		end
-		p:SetAttribute("ArenaId", arena.Id)
-		p:SetAttribute("InMatch", true)
-		p:SetAttribute("Cash", level.StartCash)
-		teleportTo(p, arena.Spawn, 6)
 	end
 
 	for wave = 1, level.Waves do
@@ -1079,15 +1129,15 @@ local function runMatch(arena, participants, level)
 	endMatch(arena)
 end
 
--- ===== LOBBY QUEUES (one per pad / arena) =====
-local function playersOnPad(arena)
+-- ===== LOBBY QUEUES (one per pad) =====
+local function playersOnPad(q)
 	local found = {}
 	local sawEmpty = false -- someone is on the pad but has no team equipped
-	local cf, size = arena.Pad.CFrame, arena.Pad.Size
+	local cf, size = q.Pad.CFrame, q.Pad.Size
 
 	for _, p in ipairs(Players:GetPlayers()) do
 		if #found >= MAX_PLAYERS then break end
-		if not playerArena[p] then
+		if not playerArena[p] and not p:GetAttribute("Teleporting") then
 			local char = p.Character
 			local hrp = char and char:FindFirstChild("HumanoidRootPart")
 			if hrp then
@@ -1107,76 +1157,98 @@ local function playersOnPad(arena)
 end
 
 -- What the level-select window on the pad needs to know (read by LevelSelectUI)
-local function publishPad(arena, countdown)
-	local pad = arena.Pad
-	pad:SetAttribute("Host", arena.Host and arena.Host.UserId or 0)
-	pad:SetAttribute("HostName", arena.Host and arena.Host.DisplayName or "")
-	pad:SetAttribute("Level", arena.LevelId or 0)
+local function publishPad(q, countdown)
+	local pad = q.Pad
+	pad:SetAttribute("Host", q.Host and q.Host.UserId or 0)
+	pad:SetAttribute("HostName", q.Host and q.Host.DisplayName or "")
+	pad:SetAttribute("Level", q.LevelId or 0)
 	pad:SetAttribute("Countdown", countdown or -1)
-	pad:SetAttribute("Running", arena.Running)
+	pad:SetAttribute("Running", q.Running)
 end
 
-local function updateQueue(arena, dt)
-	local queued, sawEmpty = playersOnPad(arena)
+-- The countdown ran out: off they go
+local function startMatch(q, queued, level)
+	q.Countdown = nil
+	q.Running = true
+	q.Host = nil
+	q.LevelId = nil
+	publishPad(q)
 
-	if arena.Running then
-		arena.Label.Text = string.format("Match in progress\n%d waiting", #queued)
-		publishPad(arena)
+	if USE_MATCH_SERVERS then
+		-- the team gets its own match server; the pad is free again a moment later
+		q.Label.Text = "Teleporting to the match..."
+		task.spawn(function()
+			local ok, err = MatchTeleport.SendToMatch(queued, level.Id)
+			if not ok then
+				warn("[GameService] pad " .. q.Id .. " couldn't send its team to a match:", err)
+			end
+			task.wait(2)
+			q.Running = false
+		end)
+		return
+	end
+
+	-- no match servers: play it right here in this pad's sky arena
+	task.spawn(function()
+		local ok, err = pcall(runMatch, q.Arena, queued, level)
+		if not ok then
+			warn("[GameService] arena " .. q.Id .. " error:", err)
+			endMatch(q.Arena)
+		end
+		q.Running = false
+	end)
+end
+
+local function updateQueue(q, dt)
+	local queued, sawEmpty = playersOnPad(q)
+
+	if q.Running then
+		q.Label.Text = USE_MATCH_SERVERS and "Teleporting to the match..."
+			or string.format("Match in progress\n%d waiting", #queued)
+		publishPad(q)
 		return
 	end
 
 	if #queued == 0 then
-		arena.Host = nil
-		arena.LevelId = nil
-		arena.Countdown = nil
+		q.Host = nil
+		q.LevelId = nil
+		q.Countdown = nil
 		if sawEmpty then
-			arena.Label.Text = "Equip a unit first!\n(summon at the fountain)"
+			q.Label.Text = "Equip a unit first!\n(summon at the fountain)"
 		else
-			arena.Label.Text = string.format("Step here to queue\n0/%d", MAX_PLAYERS)
+			q.Label.Text = string.format("Step here to queue\n0/%d", MAX_PLAYERS)
 		end
-		publishPad(arena)
+		publishPad(q)
 		return
 	end
 
 	-- The first player on the pad is the host. If they step off, the next player takes over
 	-- and picks again.
-	if not arena.Host or not table.find(queued, arena.Host) then
-		arena.Host = queued[1]
-		arena.LevelId = nil
-		arena.Countdown = nil
+	if not q.Host or not table.find(queued, q.Host) then
+		q.Host = queued[1]
+		q.LevelId = nil
+		q.Countdown = nil
 	end
 
-	local level = arena.LevelId and LevelData.Get(arena.LevelId)
+	local level = q.LevelId and LevelData.Get(q.LevelId)
 	if not level then
-		arena.Label.Text = string.format("%s is choosing a level\n%d/%d players", arena.Host.DisplayName, #queued, MAX_PLAYERS)
-		publishPad(arena)
+		q.Label.Text = string.format("%s is choosing a level\n%d/%d players", q.Host.DisplayName, #queued, MAX_PLAYERS)
+		publishPad(q)
 		return
 	end
 
-	local countdown = arena.Countdown or QUEUE_COUNTDOWN
+	local countdown = q.Countdown or QUEUE_COUNTDOWN
 	if #queued >= MAX_PLAYERS and countdown > FULL_COUNTDOWN then
 		countdown = FULL_COUNTDOWN
 	end
 	countdown -= dt
-	arena.Countdown = countdown
+	q.Countdown = countdown
 	local secondsLeft = math.max(0, math.ceil(countdown))
-	arena.Label.Text = string.format("%s (%s)\nStarting in %d - %d/%d", level.Name, level.Difficulty, secondsLeft, #queued, MAX_PLAYERS)
-	publishPad(arena, secondsLeft)
+	q.Label.Text = string.format("%s (%s)\nStarting in %d - %d/%d", level.Name, level.Difficulty, secondsLeft, #queued, MAX_PLAYERS)
+	publishPad(q, secondsLeft)
 
 	if countdown <= 0 then
-		arena.Countdown = nil
-		arena.Running = true
-		arena.Host = nil
-		arena.LevelId = nil
-		publishPad(arena)
-		task.spawn(function()
-			local ok, err = pcall(runMatch, arena, queued, level)
-			if not ok then
-				warn("[GameService] arena " .. arena.Id .. " error:", err)
-				endMatch(arena)
-			end
-			arena.Running = false
-		end)
+		startMatch(q, queued, level)
 	end
 end
 
@@ -1186,14 +1258,14 @@ levelRemote.Name = "LevelSelectRemote"
 levelRemote.Parent = ReplicatedStorage
 
 levelRemote.OnServerInvoke = function(player, action, levelId)
-	local arena
-	for _, a in ipairs(arenas) do
-		if a.Host == player and not a.Running then
-			arena = a
+	local q
+	for _, candidate in ipairs(queues) do
+		if candidate.Host == player and not candidate.Running then
+			q = candidate
 			break
 		end
 	end
-	if not arena then
+	if not q then
 		return { Success = false, Error = "Only the first player on the pad picks the level." }
 	end
 
@@ -1209,23 +1281,121 @@ levelRemote.OnServerInvoke = function(player, action, levelId)
 		if not LevelData.IsUnlocked(level, cleared) then
 			return { Success = false, Error = "Beat " .. LevelData.Get(level.Requires).Name .. " first." }
 		end
-		arena.LevelId = level.Id
-		arena.Countdown = nil -- restart the countdown for the new pick
+		q.LevelId = level.Id
+		q.Countdown = nil -- restart the countdown for the new pick
 		return { Success = true }
 
 	elseif action == "Start" then
-		if not arena.LevelId then
+		if not q.LevelId then
 			return { Success = false, Error = "Pick a level first." }
 		end
-		arena.Countdown = math.min(arena.Countdown or QUEUE_COUNTDOWN, FULL_COUNTDOWN)
+		q.Countdown = math.min(q.Countdown or QUEUE_COUNTDOWN, FULL_COUNTDOWN)
 		return { Success = true }
 	end
 	return { Success = false, Error = "Unknown action." }
 end
 
+-- ===== MATCH SERVER =====
+-- Is this player on the team the lobby sent here? (In a Studio test anyone may play.)
+local function onTeam(p)
+	if not matchInfo then return false end
+	if type(matchInfo.Players) ~= "table" then return true end
+	return table.find(matchInfo.Players, p.UserId) ~= nil
+end
+
+-- Shows the same status line to everyone on this server
+local function setStatusForAll(text)
+	for _, p in ipairs(Players:GetPlayers()) do
+		p:SetAttribute("MatchStatus", text)
+	end
+end
+
+-- Team members who have arrived and finished loading
+local function arrivedTeam()
+	local list = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if onTeam(p) and PlayerData.Get(p) and p.Character and not p:GetAttribute("Teleporting") then
+			table.insert(list, p)
+		end
+	end
+	return list
+end
+
+local matchStarted = false
+
+-- Someone arrived on this match server
+onMatchServerJoin = function(player)
+	while matchInfo == nil and player.Parent do
+		task.wait(0.5) -- still reading what the lobby sent
+	end
+	if not player.Parent or matchInfo == false then return end
+	if not onTeam(player) then
+		-- not on this team (shouldn't happen): back to the lobby
+		MatchTeleport.ToLobby({ player }, matchInfo.Lobby)
+		return
+	end
+	local level = LevelData.Get(matchInfo.LevelId)
+	player:SetAttribute("LevelName", level and level.Name or "")
+	player:SetAttribute("MaxWave", level and level.Waves or 0)
+	if matchStarted then
+		-- got here after the match began (slow loading): jump straight in
+		while player.Parent and not (PlayerData.Get(player) and player.Character) do
+			task.wait(0.5)
+		end
+		local arena = arenas[1]
+		if player.Parent and not playerArena[player] and arena.Level
+			and (arena.State == "Intermission" or arena.State == "Playing") then
+			enterArena(arena, player)
+		end
+	end
+end
+
+local function runMatchServer()
+	local arena = arenas[1]
+	if RunService:IsStudio() then
+		matchInfo = { LevelId = PlaceConfig.StudioTestLevel } -- Play in Studio: test a level alone
+	else
+		matchInfo = MatchTeleport.ReadMatchInfo() or false
+	end
+	local level = matchInfo and LevelData.Get(matchInfo.LevelId)
+	if not level then
+		warn("[GameService] This match server has no match info, so everyone goes back to the lobby.")
+		matchInfo = false
+		setStatusForAll("Something went wrong, back to the lobby...")
+		MatchTeleport.ToLobby(Players:GetPlayers())
+		return
+	end
+
+	-- wait for the whole team (or as many as made it in time)
+	local expected = type(matchInfo.Players) == "table" and #matchInfo.Players or 1
+	local startTime = os.clock()
+	local team = {}
+	while true do
+		team = arrivedTeam()
+		if #team >= expected or (#team > 0 and os.clock() - startTime > TEAM_WAIT) then break end
+		if os.clock() - startTime > TEAM_WAIT * 3 then return end -- nobody came: the server closes on its own
+		setStatusForAll(string.format("Waiting for your team (%d/%d)", #team, expected))
+		task.wait(0.5)
+	end
+
+	matchStarted = true
+	local ok, err = pcall(runMatch, arena, team, level)
+	if not ok then
+		warn("[GameService] match error:", err)
+		endMatch(arena)
+	end
+	-- whoever is still here (a teleport that failed) goes back too
+	MatchTeleport.ToLobby(Players:GetPlayers(), matchInfo.Lobby)
+end
+
+if IS_MATCH_SERVER then
+	runMatchServer()
+	return
+end
+
 while true do
 	local dt = task.wait(0.25)
-	for _, arena in ipairs(arenas) do
-		updateQueue(arena, dt)
+	for _, q in ipairs(queues) do
+		updateQueue(q, dt)
 	end
 end

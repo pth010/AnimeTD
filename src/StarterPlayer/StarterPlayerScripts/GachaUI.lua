@@ -1,7 +1,7 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: GachaUI
--- (replaces the earlier version: gem amounts use the gem icon from CurrencyIcons)
+-- (replaces the earlier version: does nothing in the match place, which has no fountain)
 -- A summon window with a rotating 3D model of the featured unit, and a full-screen reveal
 -- where cards flip over one by one.
 -- The summon window pops up when you walk onto the lobby's Summon Altar (the Wishing
@@ -12,6 +12,8 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-- the lobby only: the match place has none of this
+if require(ReplicatedStorage:WaitForChild("PlaceConfig")).IsMatchPlace() then return end
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))

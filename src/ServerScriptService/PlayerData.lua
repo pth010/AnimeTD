@@ -1,12 +1,12 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: ModuleScript
 -- NAME: PlayerData
--- (replaces the earlier version: every unit is now its own entry with its own trait, level,
---  stars and lock, and the inventory has slots (100 to start, more from game passes).
---  Old saves are converted automatically: a stack of 3 becomes 3 separate units.
---  Units can be put into a chosen team slot, see PlayerData.EquipToSlot. Each player's screen
---  layout (where the team bar, Inventory button and currency counter sit) is saved too, and
---  the on/off switches from the Settings popup start ON every time a player joins.)
+-- (replaces the earlier version: adds a session lock for the lobby <-> match server teleports.
+--  A server marks a player's save as "in use" while they're on it, and lets go of it
+--  (PlayerData.Release) when they leave or teleport. A server that loads a player still marked
+--  as in use by another server waits up to 20 seconds for it to let go, and a server that has
+--  lost a player to another server never saves over them again. So rewards earned in a match
+--  can't be overwritten by a late save from the lobby, or the other way round.)
 --
 -- Single source of truth for each player's gems, gold, trait shards, pity, units, locks,
 -- team and settings.
@@ -31,6 +31,11 @@ local SAVE_DELAY = 5 -- seconds after a change before it is written
 local STARTING_GEMS = 1000
 local STARTING_GOLD = 0
 local STARTING_SHARDS = 3 -- enough for a few trait summons in the Traits Cave
+
+-- Session lock (see the top). A server refreshes its mark on every save (autosave included),
+-- so a mark older than LOCK_TIMEOUT belongs to a server that crashed.
+local LOCK_TIMEOUT = 300 -- seconds
+local LOCK_WAIT = 20     -- the longest a server waits for another one to let go of a player
 
 -- Units every NEW player starts with. Empty = the inventory starts empty.
 -- Example: { ["Blade Novice"] = 1 }
@@ -296,21 +301,62 @@ function PlayerData.Sync(player)
 end
 
 -- ===== Loading =====
+-- Is this save marked as in use by another server that's still running?
+local function lockedByOther(saved)
+	local session = type(saved) == "table" and saved.Session
+	return type(session) == "table" and session.Job ~= game.JobId and tonumber(session.Time) ~= nil
+		and os.time() - session.Time < LOCK_TIMEOUT
+end
+
+-- Loads a player's save and marks it as in use by this server. If another server still has
+-- it (they just teleported here and it's finishing their save), waits for it to let go.
 local function loadFromStore(userId)
 	if not store then
 		return false, nil
 	end
-	for _ = 1, 3 do
-		local ok, result = pcall(function()
-			return store:GetAsync("Player_" .. userId)
+	local giveUpAt = os.clock() + LOCK_WAIT
+	local failures = 0
+	while true do
+		local saved, waiting = nil, false
+		local ok, err = pcall(function()
+			store:UpdateAsync("Player_" .. userId, function(old)
+				saved = old
+				waiting = lockedByOther(old) and os.clock() < giveUpAt
+				if waiting then
+					return nil -- not ours yet: change nothing
+				end
+				local new = type(old) == "table" and table.clone(old) or {}
+				new.Session = { Job = game.JobId, Time = os.time() }
+				return new
+			end)
 		end)
-		if ok then
-			return true, result
+		if ok and not waiting then
+			return true, saved
+		elseif ok then
+			task.wait(2) -- the other server is still saving
+		else
+			failures += 1
+			warn("[PlayerData] load failed:", err)
+			if failures >= 3 then
+				return false, nil
+			end
+			task.wait(1)
 		end
-		warn("[PlayerData] load failed:", result)
-		task.wait(1)
 	end
-	return false, nil
+end
+
+-- Lets go of a player's save without changing anything else (they left while it was loading)
+local function unlock(userId)
+	pcall(function()
+		store:UpdateAsync("Player_" .. userId, function(old)
+			if type(old) ~= "table" or type(old.Session) ~= "table" or old.Session.Job ~= game.JobId then
+				return nil
+			end
+			local new = table.clone(old)
+			new.Session = nil
+			return new
+		end)
+	end)
 end
 
 local function cleanNumber(v, min, max)
@@ -400,7 +446,10 @@ end
 
 function PlayerData.Load(player)
 	local ok, saved = loadFromStore(player.UserId)
-	if not player.Parent then return end -- left while loading
+	if not player.Parent then -- left while loading
+		if ok then unlock(player.UserId) end
+		return
+	end
 
 	local profile = {
 		Gems = STARTING_GEMS,
@@ -420,9 +469,10 @@ function PlayerData.Load(player)
 		Busy = false,
 		SavePending = false,
 		CanSave = ok, -- never save over a profile we failed to load
+		Released = false, -- true once this server has let go of the player (see Release)
 	}
 
-	if ok and type(saved) == "table" then
+	if ok and type(saved) == "table" and saved.Gems ~= nil then
 		profile.Gems = tonumber(saved.Gems) or STARTING_GEMS
 		profile.Gold = tonumber(saved.Gold) or STARTING_GOLD
 		profile.Shards = tonumber(saved.Shards) or STARTING_SHARDS
@@ -469,14 +519,18 @@ function PlayerData.Load(player)
 	end
 
 	checkSlotPasses(player, profile)
-	if not player.Parent then return end
+	if not player.Parent then
+		if ok then unlock(player.UserId) end
+		return
+	end
 	normalizeEquipment(profile)
 	PlayerData.Profiles[player] = profile
 	PlayerData.Sync(player)
 end
 
 -- ===== Saving =====
-function PlayerData.Save(player)
+-- release = true lets go of the player's save (they're leaving or teleporting)
+function PlayerData.Save(player, release)
 	local profile = PlayerData.Profiles[player]
 	if not store or not profile or not profile.CanSave then return end
 
@@ -487,8 +541,14 @@ function PlayerData.Save(player)
 	table.sort(units, function(a, b) return a.I < b.I end)
 
 	local key = "Player_" .. player.UserId
+	local lost = false
 	local ok, err = pcall(function()
 		store:UpdateAsync(key, function(old)
+			-- another server took this player over: never write over what it saved
+			lost = type(old) == "table" and type(old.Session) == "table" and old.Session.Job ~= game.JobId
+			if lost then
+				return nil
+			end
 			-- beaten levels: keep every level either this or another server has seen beaten
 			local cleared = {}
 			for id in pairs(profile.Cleared) do
@@ -520,12 +580,37 @@ function PlayerData.Save(player)
 				BonusSlots = profile.BonusSlots,
 				UILayout = profile.UILayout,
 				Settings = profile.Settings,
+				-- still in use by this server, or let go (nil)
+				Session = not (release or profile.Released) and { Job = game.JobId, Time = os.time() } or nil,
 			}
 		end)
 	end)
 	if not ok then
 		warn("[PlayerData] save failed:", err)
+	elseif lost then
+		profile.CanSave = false
+		warn("[PlayerData] " .. player.Name .. "'s data is in use by another server now, so this server stops saving it.")
 	end
+end
+
+-- Saves and lets go of the player's data so another server can load it (before a teleport,
+-- and when they leave). Yields until saved. Nothing they do here is saved after this.
+function PlayerData.Release(player)
+	local profile = PlayerData.Profiles[player]
+	if not profile or profile.Released then return end
+	PlayerData.Save(player, true)
+	profile.Released = true
+	profile.SavedBeforeRelease = profile.CanSave
+	profile.CanSave = false
+end
+
+-- The teleport failed and the player is staying here: take their data back
+function PlayerData.Reclaim(player)
+	local profile = PlayerData.Profiles[player]
+	if not profile or not profile.Released then return end
+	profile.Released = false
+	profile.CanSave = profile.SavedBeforeRelease == true
+	PlayerData.RequestSave(player)
 end
 
 -- Saves a few seconds from now (many changes in a row become one write)
@@ -897,7 +982,7 @@ for _, p in ipairs(Players:GetPlayers()) do
 end
 
 Players.PlayerRemoving:Connect(function(player)
-	PlayerData.Save(player)
+	PlayerData.Release(player)
 	PlayerData.Profiles[player] = nil
 end)
 
@@ -917,7 +1002,7 @@ game:BindToClose(function()
 	for player in pairs(PlayerData.Profiles) do
 		pending += 1
 		task.spawn(function()
-			PlayerData.Save(player)
+			PlayerData.Release(player)
 			pending -= 1
 		end)
 	end

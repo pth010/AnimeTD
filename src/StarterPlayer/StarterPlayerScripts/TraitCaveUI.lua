@@ -1,7 +1,7 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: TraitCaveUI
--- (replaces the earlier version: the Trait Shards pill uses the crystal icon from CurrencyIcons)
+-- (replaces the earlier version: does nothing in the match place, which has no cave)
 -- Units show a picture of themselves and traits show their icons, in the list, the
 -- summoning circle and the odds.
 -- The Traits Cave window: pick one of your units, then summon a trait onto it for Trait
@@ -11,6 +11,8 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-- the lobby only: the match place has none of this
+if require(ReplicatedStorage:WaitForChild("PlaceConfig")).IsMatchPlace() then return end
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))

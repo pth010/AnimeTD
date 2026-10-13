@@ -1,8 +1,7 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: LevelSelectUI
--- (replaces the earlier version: the window still opens if the CurrencyIcons module is
---  missing or broken, just without the reward icons, and warns in Output)
+-- (replaces the earlier version: does nothing in the match place, which has no pads)
 -- The level-select window that pops up while you stand on a team pad in the lobby.
 --   * The first player on the pad (the host) picks the level; locked levels need the one
 --     before them beaten first. Picking a level starts the countdown, START skips most of it.
@@ -11,6 +10,8 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-- the lobby only: the match place has none of this
+if require(ReplicatedStorage:WaitForChild("PlaceConfig")).IsMatchPlace() then return end
 local LevelData = require(ReplicatedStorage:WaitForChild("LevelData"))
 -- The reward icons are a nice-to-have: if CurrencyIcons is missing or broken, the level
 -- select must still open (you can't queue without it), so load it carefully.

@@ -1,10 +1,11 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: ArenaBuilder
--- (replaces the earlier version: a much longer map where the whole ground is buildable,
---  with houses and trees in the way and one mountain for high-ground units)
+-- (replaces the earlier version: in the match place it builds ONE arena; in a live lobby that
+--  sends teams to match servers it builds none, see PlaceConfig)
 -- Builds FIVE identical battle arenas, one per team pad in the lobby, so five teams
--- can play at the same time. Each arena floats high in the sky (Y = 300) on its own floor.
+-- can play at the same time (only when matches run inside the lobby server: in Studio, or
+-- while PlaceConfig.MatchPlaceId is 0). Each arena floats high in the sky (Y = 300).
 --
 -- Layout: Workspace.Arenas > Arena1 ... Arena5, each containing
 --   Waypoints      parts named 1, 2, 3... in path order (a long winding path)
@@ -16,7 +17,10 @@
 
 if workspace:FindFirstChild("Arenas") then return end
 
-local NUM_ARENAS = 5
+local PlaceConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("PlaceConfig"))
+if PlaceConfig.UsesMatchServers() then return end -- the lobby's teams play on match servers
+
+local NUM_ARENAS = PlaceConfig.IsMatchPlace() and 1 or 5
 local ARENA_SPACING = 360
 local ARENA_HEIGHT = 300
 local PATH_WIDTH = 6

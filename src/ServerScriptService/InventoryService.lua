@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: InventoryService
--- (replaces the earlier version: adds "SaveSettings", and the layout and settings can be
---  saved during a match too)
+-- (replaces the earlier version: nothing can change while you're teleporting to or from a
+--  match, since your data has already been saved and handed over to the other server)
 -- Handles every button in the inventory and the Traits Cave. The server checks everything,
 -- so a locked unit can never be deleted by a hacked client.
 
@@ -42,6 +42,9 @@ end
 remote.OnServerInvoke = function(player, action, a, b)
 	if typeof(action) ~= "string" then
 		return { Success = false, Error = "Bad request." }
+	end
+	if player:GetAttribute("Teleporting") then
+		return { Success = false, Error = "Teleporting..." }
 	end
 	-- screen settings can change any time, even mid-match
 	if action == "SaveLayout" then

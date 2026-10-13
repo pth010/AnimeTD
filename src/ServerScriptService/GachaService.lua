@@ -1,7 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GachaService
--- (replaces the earlier version: summoning needs free inventory slots, see UnitData.BaseSlots)
+-- (replaces the earlier version: no summoning during a match or while teleporting to one)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -78,6 +78,9 @@ summonRemote.OnServerInvoke = function(player, count)
 	end
 	if count ~= 1 and count ~= 10 then
 		return { Success = false, Error = "Invalid summon." }
+	end
+	if player:GetAttribute("InMatch") or player:GetAttribute("Teleporting") then
+		return { Success = false, Error = "Not right now." }
 	end
 
 	local cost = (count == 10) and TEN_COST or SINGLE_COST
