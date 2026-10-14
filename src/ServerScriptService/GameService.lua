@@ -1,11 +1,11 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: a problem giving out win rewards can no longer stop the
---  victory screen, and Output shows when the results screen is sent. Works in both places:
---  in the lobby the pads send each team to its own match server (see MatchTeleport), and in
---  the match place it plays the level the lobby picked, then sends everyone back. In Studio,
---  or while PlaceConfig.MatchPlaceId is 0, matches run in the lobby's sky arenas.)
+-- (replaces the earlier version: the break between waves is now 3 seconds (INTERMISSION).
+--  Works in both places: in the lobby the pads send each team to its own match server (see
+--  MatchTeleport), and in the match place it plays the level the lobby picked, then sends
+--  everyone back. In Studio, or while PlaceConfig.MatchPlaceId is 0, matches run in the
+--  lobby's sky arenas.)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -41,7 +41,7 @@ local TEAM_WAIT = 45           -- match server: the longest it waits for the who
 
 -- Waves, start cash, boss timing, enemy strength and win rewards are set per level in LevelData
 local BASE_HEALTH = 20
-local INTERMISSION = 10
+local INTERMISSION = 3 -- seconds between waves
 local SPAWN_INTERVAL = 1
 local MIN_UNIT_SPACING = 4
 local MAX_UNITS_PER_PLAYER = 12 -- total units per player, on top of the per-unit limits in UnitData
