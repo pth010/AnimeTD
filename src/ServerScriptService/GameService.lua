@@ -1,7 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: the break between waves is now 3 seconds (INTERMISSION).
+-- (replaces the earlier version: players can leave a match at any time with "Return to
+--  lobby" in the Settings popup; their units are removed and the rest of the team plays on.
 --  Works in both places: in the lobby the pads send each team to its own match server (see
 --  MatchTeleport), and in the match place it plays the level the lobby picked, then sends
 --  everyone back. In Studio, or while PlaceConfig.MatchPlaceId is 0, matches run in the
@@ -909,18 +910,23 @@ for _, p in ipairs(Players:GetPlayers()) do
 	onPlayerAdded(p)
 end
 
+-- Takes away every unit a player placed in an arena (they left the match)
+local function removeUnitsOf(arena, player)
+	for i = #arena.Units, 1, -1 do
+		if arena.Units[i].Owner == player then
+			arena.Units[i].Part:Destroy()
+			table.remove(arena.Units, i)
+		end
+	end
+end
+
 Players.PlayerRemoving:Connect(function(player)
 	local arena = playerArena[player]
 	playerArena[player] = nil
 	if arena then
 		arena.Players[player] = nil
 		arena.Votes[player] = nil
-		for i = #arena.Units, 1, -1 do
-			if arena.Units[i].Owner == player then
-				arena.Units[i].Part:Destroy()
-				table.remove(arena.Units, i)
-			end
-		end
+		removeUnitsOf(arena, player)
 	end
 end)
 
@@ -1114,7 +1120,29 @@ local function showResults(arena, victory)
 end
 
 -- Players answer the results screen
+-- "Return to lobby" in the Settings popup: leave the match at any time. Your units go with
+-- you; the rest of the team keeps playing (the match ends if nobody is left).
+local function leaveMatch(player)
+	local arena = playerArena[player]
+	if arena then
+		removeUnitsOf(arena, player)
+		sendToLobby(arena, player)
+		if arena.State == "Results" then
+			local ready = 0
+			for _ in pairs(arena.Votes) do ready += 1 end
+			setMatchAttr(arena, "ResultsReady", ready)
+		end
+	elseif IS_MATCH_SERVER then
+		-- still waiting for the team to arrive: go back anyway
+		task.spawn(MatchTeleport.ToLobby, { player }, matchInfo and matchInfo.Lobby)
+	end
+end
+
 resultsEvent.OnServerEvent:Connect(function(player, choice)
+	if choice == "Leave" then
+		leaveMatch(player)
+		return
+	end
 	local arena = playerArena[player]
 	if not arena or arena.State ~= "Results" then return end
 	if choice == "Again" then

@@ -1,13 +1,14 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: LayoutUI
--- (replaces the earlier version: the Settings button sits right under the Inventory button,
---  half its width and the same height)
+-- (replaces the earlier version: during a match the Settings popup has a "Return to lobby"
+--  button at the bottom; tap it twice to leave the match)
 -- The Settings popup (Settings button under the Inventory button, always on screen):
 --   * Screen Layout: move and resize the team bar, the Inventory button and the
 --     Gems / Gold / Shards counter with sliders
 --   * Trait icons over units, enemy health bars, HP numbers on health bars: on / off
 --   * Auto-equip best team: on / off (lobby only)
+--   * Return to lobby (in a match only): leave the match. Tap twice, so it can't happen by accident.
 -- Everything is saved with your data (PlayerData.SaveLayout / SaveSettings), so it's the
 -- same next time you play.
 --
@@ -462,13 +463,55 @@ player:GetAttributeChangedSignal("Settings"):Connect(function()
 	applyAllVisuals()
 end)
 
+-- ===== Return to lobby (in a match only) =====
+-- The server's ResultsEvent also takes "Leave": out of the match at any time
+local resultsEvent = ReplicatedStorage:WaitForChild("ResultsEvent")
+local LEAVE_COLOR = Color3.fromRGB(200, 60, 70)
+local LEAVE_CONFIRM_TIME = 3 -- seconds the "Tap again" stays before it resets
+local leaveY = ROW_Y0 + 5 * ROW_H + 10
+local leaveButton = button(settingsPanel, "Return to lobby", UDim2.fromOffset(16, leaveY), UDim2.fromOffset(SW - 32, 38), LEAVE_COLOR, 15)
+leaveButton.Name = "ReturnToLobby"
+local leaveArmed = false -- the first tap asks "are you sure?"
+
+local function resetLeave()
+	leaveArmed = false
+	leaveButton.Text = "Return to lobby"
+	leaveButton.BackgroundColor3 = LEAVE_COLOR
+end
+
+-- The popup is taller in a match, to fit the button
+local function updateLeaveVisibility()
+	local inMatch = player:GetAttribute("InMatch") == true
+	leaveButton.Visible = inMatch
+	settingsPanel.Size = UDim2.fromOffset(SW, inMatch and (leaveY + 38 + 14) or SH)
+	resetLeave()
+end
+updateLeaveVisibility()
+
 local function closeSettings()
 	settingsPanel.Visible = false
+	resetLeave()
 end
+
+leaveButton.Activated:Connect(function()
+	if player:GetAttribute("InMatch") ~= true then return end
+	if not leaveArmed then
+		leaveArmed = true
+		leaveButton.Text = "Tap again to leave the match"
+		leaveButton.BackgroundColor3 = Color3.fromRGB(150, 30, 40)
+		task.delay(LEAVE_CONFIRM_TIME, function()
+			if leaveArmed then resetLeave() end
+		end)
+		return
+	end
+	resultsEvent:FireServer("Leave")
+	closeSettings()
+end)
 
 local function openSettings()
 	closePanel()
 	autoNote.Visible = player:GetAttribute("InMatch") == true
+	updateLeaveVisibility()
 	settingsPanel.Visible = true
 	drawAuto()
 end
@@ -496,4 +539,5 @@ doneBtn.Activated:Connect(closePanel)
 
 player:GetAttributeChangedSignal("InMatch"):Connect(function()
 	autoNote.Visible = player:GetAttribute("InMatch") == true
+	updateLeaveVisibility()
 end)
