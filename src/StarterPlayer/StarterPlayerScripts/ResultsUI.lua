@@ -6,6 +6,8 @@
 --   PLAY AGAIN       - the team replays once everyone left on the screen has picked it
 --   RETURN TO LOBBY  - go back to the lobby straight away
 -- After 30 seconds, players who picked Play Again replay and everyone else returns to the lobby.
+-- (replaces the earlier version: no longer breaks if the camera isn't ready when it starts,
+--  and prints "[ResultsUI]" lines in the Output so problems are easy to spot)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -83,12 +85,25 @@ panelStroke.Parent = panel
 
 local uiScale = Instance.new("UIScale")
 uiScale.Parent = panel
+-- Shrinks the window on small screens. The camera can be missing for a moment when the
+-- game starts (or get swapped), so this never assumes it's there.
+local cameraConn
 local function fitToScreen()
-	local vp = workspace.CurrentCamera.ViewportSize
-	uiScale.Scale = math.min(1, (vp.X - 20) / WIDTH, (vp.Y - 20) / HEIGHT)
+	local camera = workspace.CurrentCamera
+	if not camera then return end
+	local vp = camera.ViewportSize
+	uiScale.Scale = math.clamp(math.min((vp.X - 20) / WIDTH, (vp.Y - 20) / HEIGHT), 0.4, 1)
 end
-fitToScreen()
-workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(fitToScreen)
+local function watchCamera()
+	if cameraConn then cameraConn:Disconnect() end
+	local camera = workspace.CurrentCamera
+	if camera then
+		cameraConn = camera:GetPropertyChangedSignal("ViewportSize"):Connect(fitToScreen)
+	end
+	fitToScreen()
+end
+watchCamera()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchCamera)
 
 local title = label(panel, "", UDim2.fromOffset(0, 14), UDim2.new(1, 0, 0, 50), 44, WHITE, Enum.Font.GothamBlack)
 title.TextStrokeTransparency = 0.5
@@ -248,9 +263,16 @@ resultsEvent.OnClientEvent:Connect(function(data)
 	if data.Hide then
 		hide()
 	else
-		show(data)
+		print("[ResultsUI] showing the", data.Victory and "victory" or "defeat", "screen")
+		fitToScreen()
+		local ok, err = pcall(show, data)
+		if not ok then
+			warn("[ResultsUI] couldn't fill in the results screen:", err)
+			gui.Enabled = true -- still show it, so you can press the buttons
+		end
 	end
 end)
+print("[ResultsUI] ready")
 
 againButton.Activated:Connect(function()
 	if votedAgain or not gui.Enabled then return end

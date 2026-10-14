@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: placed units get their trait, level and evolution bonuses
---  (see TraitData and ProgressData))
+-- (replaces the earlier version: a problem paying out win rewards can no longer skip the
+--  victory screen, and match results are printed in the Output)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -922,10 +922,16 @@ local function playMatch(arena, participants)
 
 	arena.State = "Over"
 	for p in pairs(arena.Players) do
-		PlayerData.AddGold(p, level.WinGold)
-		PlayerData.AddGems(p, level.WinGems)
-		PlayerData.MarkCleared(p, level.Id) -- unlocks the next level
-		statsFor(arena, p).Gems += level.WinGems
+		-- paid one by one in pcall, so one failure can't stop the victory screen
+		local ok, err = pcall(function()
+			PlayerData.AddGold(p, level.WinGold)
+			PlayerData.AddGems(p, level.WinGems)
+			statsFor(arena, p).Gems += level.WinGems
+			PlayerData.MarkCleared(p, level.Id) -- unlocks the next level
+		end)
+		if not ok then
+			warn("[GameService] couldn't pay win rewards to " .. p.Name .. ":", err)
+		end
 	end
 	return true
 end
@@ -948,6 +954,8 @@ local function showResults(arena, victory)
 
 	local teamCount = 0
 	for _ in pairs(arena.Players) do teamCount += 1 end
+	print(string.format("[GameService] arena %d: %s on %s, showing results to %d player(s)",
+		arena.Id, victory and "VICTORY" or "defeat", arena.Level.Name, teamCount))
 
 	for p in pairs(arena.Players) do
 		local mine = statsFor(arena, p)
