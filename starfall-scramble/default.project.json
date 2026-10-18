@@ -1,0 +1,20 @@
+{
+  "name": "StarfallScramble",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "StarConfig": { "$path": "src/ReplicatedStorage/StarConfig.lua" }
+    },
+    "ServerScriptService": {
+      "StarData": { "$path": "src/ServerScriptService/StarData.lua" },
+      "IslandBuilder": { "$path": "src/ServerScriptService/IslandBuilder.server.lua" },
+      "StarService": { "$path": "src/ServerScriptService/StarService.server.lua" },
+      "StarBoard": { "$path": "src/ServerScriptService/StarBoard.server.lua" }
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "StarHUD": { "$path": "src/StarterPlayerScripts/StarHUD.client.lua" }
+      }
+    }
+  }
+}
