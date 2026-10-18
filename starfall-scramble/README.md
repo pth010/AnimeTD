@@ -16,6 +16,8 @@ Timed server events take turns every few minutes. **Meteor Shower** brings far m
 
 The map, lighting and UI are all built by the scripts, so start from an empty **Baseplate** place. The island builder deletes the Baseplate so players can fall into the void.
 
+**Quickest:** open `StarfallScramble.rbxlx` in Roblox Studio (File > Open from File) and press Play. It already has every script in place. Rebuild it after editing the scripts with `rojo build default.project.json -o StarfallScramble.rbxlx`.
+
 **With Rojo:** run `rojo serve` from this folder (it uses `default.project.json`) and connect from the Rojo plugin in Studio.
 
 **By hand:** create each script in Studio where its header says (`PLACE IN`, `TYPE`, `NAME`) and paste in the file's contents:

@@ -1,0 +1,1945 @@
+<roblox version="4">
+  <Item class="ReplicatedStorage" referent="0">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="ModuleScript" referent="1">
+      <Properties>
+        <string name="Name">StarConfig</string>
+        <string name="Source"><![CDATA[-- PLACE IN: ReplicatedStorage
+-- TYPE: ModuleScript
+-- NAME: StarConfig
+-- Every number that shapes Starfall Scramble lives here, shared by the server and the HUD.
+-- Tweak freely: star values, upgrade prices, the Supernova (rebirth) curve, events, meteors.
+
+local StarConfig = {}
+
+-- ===== Stars =====
+-- Value   how many stars it adds to your bag when you grab it
+-- Weight  how often it spawns compared to the others
+StarConfig.Stars = {
+	{ Name = "Spark",  Value = 1,   Weight = 70, Size = 1.3, Color = Color3.fromRGB(255, 244, 190) },
+	{ Name = "Azure",  Value = 5,   Weight = 22, Size = 1.6, Color = Color3.fromRGB(110, 200, 255) },
+	{ Name = "Golden", Value = 25,  Weight = 7,  Size = 2.0, Color = Color3.fromRGB(255, 200, 60) },
+	{ Name = "Prism",  Value = 150, Weight = 1,  Size = 2.5, Color = Color3.fromRGB(255, 120, 230), Rainbow = true },
+}
+StarConfig.ByName = {}
+for _, def in ipairs(StarConfig.Stars) do
+	StarConfig.ByName[def.Name] = def
+end
+
+StarConfig.MaxStars = 90          -- most stars lying on the island at once
+StarConfig.StarLifetime = 60      -- seconds a landed star waits before fading away
+StarConfig.FallTime = 1.4         -- seconds a star takes to fall from the sky
+
+-- ===== Meteors =====
+StarConfig.MeteorWarning = 2.2    -- seconds the red circle shows before impact
+StarConfig.MeteorRadius = 11      -- blast radius in studs
+StarConfig.MeteorDropShare = 0.5  -- share of carried stars knocked out of your bag
+StarConfig.MeteorAimAtPlayers = 0.6 -- chance a meteor aims at a player instead of a random spot
+
+-- ===== Normal play and timed events =====
+-- SpawnInterval  seconds between stars (divided by sqrt(players), so busy servers rain more)
+-- MeteorDelay    { min, max } seconds between meteors
+-- Weights        multiplies a star type's spawn weight during the event
+StarConfig.Normal = { SpawnInterval = 0.9, MeteorDelay = { 5, 9 } }
+StarConfig.Events = {
+	["Meteor Shower"] = {
+		Description = "Stars pour down, and so do the meteors!",
+		Color = Color3.fromRGB(255, 120, 70),
+		SpawnInterval = 0.3, MeteorDelay = { 1.2, 2.4 },
+		Weights = { Azure = 1.5, Golden = 4, Prism = 2 },
+	},
+	["Prism Rain"] = {
+		Description = "Rainbow Prism stars everywhere. Grab them fast!",
+		Color = Color3.fromRGB(255, 120, 230),
+		SpawnInterval = 0.6, MeteorDelay = { 6, 10 },
+		Weights = { Golden = 1.5, Prism = 15 },
+	},
+}
+StarConfig.EventOrder = { "Meteor Shower", "Prism Rain" }
+StarConfig.EventEvery = 210 -- seconds from the end of one event to the start of the next
+StarConfig.EventLength = 45
+
+-- ===== Upgrades (bought with Stardust) =====
+-- cost of the next level = Base * Growth ^ currentLevel
+StarConfig.Upgrades = {
+	{ Id = "Bag",    Name = "Star Bag",     Description = "Carry more stars per trip.",          Base = 40,  Growth = 1.6,  Max = 30 },
+	{ Id = "Speed",  Name = "Moon Boots",   Description = "Run faster.",                         Base = 60,  Growth = 1.75, Max = 12 },
+	{ Id = "Magnet", Name = "Star Magnet",  Description = "Grab stars from further away.",       Base = 75,  Growth = 1.7,  Max = 15 },
+	{ Id = "Luck",   Name = "Lucky Clover", Description = "Chance for a grabbed star to count double.", Base = 150, Growth = 1.8, Max = 20 },
+}
+StarConfig.UpgradeById = {}
+for _, def in ipairs(StarConfig.Upgrades) do
+	StarConfig.UpgradeById[def.Id] = def
+end
+
+function StarConfig.Capacity(level)
+	return math.floor(20 * 1.4 ^ level)
+end
+
+function StarConfig.Speed(level)
+	return 16 + 1.5 * level
+end
+
+function StarConfig.Magnet(level)
+	return 7 + 1.5 * level
+end
+
+function StarConfig.LuckChance(level)
+	return 0.04 * level
+end
+
+function StarConfig.UpgradeCost(def, level)
+	return math.floor(def.Base * def.Growth ^ level)
+end
+
+-- What an upgrade does at a level, as short text for the shop ("54 stars")
+function StarConfig.Describe(id, level)
+	if id == "Bag" then
+		return string.format("%d stars", StarConfig.Capacity(level))
+	elseif id == "Speed" then
+		return string.format("%g speed", StarConfig.Speed(level))
+	elseif id == "Magnet" then
+		return string.format("%g studs", StarConfig.Magnet(level))
+	elseif id == "Luck" then
+		return string.format("%d%%", math.floor(StarConfig.LuckChance(level) * 100 + 0.5))
+	end
+	return tostring(level)
+end
+
+-- ===== Supernova (rebirth) =====
+-- Resets your Stardust and upgrades. Every Supernova adds +50% to all Stardust you bank.
+function StarConfig.Multiplier(supernovas)
+	return 1 + 0.5 * supernovas
+end
+
+function StarConfig.SupernovaCost(supernovas)
+	return math.floor(5000 * 3.5 ^ supernovas)
+end
+
+-- 1234567 -> "1,234,567"
+function StarConfig.Commas(n)
+	local s = tostring(math.floor(n))
+	local sign, digits = string.match(s, "^(-?)(%d+)$")
+	if not digits then
+		return s
+	end
+	return sign .. digits:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+end
+
+return StarConfig
+]]></string>
+      </Properties>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="2">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Script" referent="3">
+      <Properties>
+        <string name="Name">IslandBuilder</string>
+        <token name="RunContext">0</token>
+        <string name="Source"><![CDATA[-- PLACE IN: ServerScriptService
+-- TYPE: Script
+-- NAME: IslandBuilder
+-- Builds the whole map at runtime, so an empty Baseplate place is all you need:
+--   * a floating island high in a night sky (fall off the edge and you lose your bag!)
+--   * the Star Well in the middle (bank stars here), with a beam of light you can see anywhere
+--   * star trees, glowing crystals, boulders around a partly open edge
+--   * a "How to play" sign by the spawn and the all-time leaderboard board
+--   * night lighting, bloom and atmosphere
+-- It deletes the default Baseplate (players would land on it instead of falling).
+-- If Workspace.StarfallIsland already exists (you built your own), this script does nothing.
+-- A custom island needs: StarfallIsland.Ground (folder of floor parts), StarfallIsland.StarWell
+-- (a part at the well's centre with a GuideAttachment inside), a SpawnLocation, and the
+-- attributes Center (Vector3), Radius, GroundY and WellRadius on the StarfallIsland model.
+
+if workspace:FindFirstChild("StarfallIsland") then return end
+
+local Lighting = game:GetService("Lighting")
+
+local CENTER = Vector3.new(0, 150, 0) -- top of the grass is at CENTER.Y
+local RADIUS = 110
+local WELL_RADIUS = 11
+local rng = Random.new(20261018) -- same layout every server
+
+local island = Instance.new("Model")
+island.Name = "StarfallIsland"
+local groundFolder = Instance.new("Folder")
+groundFolder.Name = "Ground"
+groundFolder.Parent = island
+local decor = Instance.new("Folder")
+decor.Name = "Decor"
+decor.Parent = island
+
+local function makePart(parent, name, size, cframe, color, material)
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Size = size
+	p.CFrame = cframe
+	p.Color = color
+	p.Material = material or Enum.Material.SmoothPlastic
+	p.Anchored = true
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Parent = parent
+	return p
+end
+
+-- Cylinders point along X, so tip them up to make a flat disc / a standing column
+local UPRIGHT = CFrame.Angles(0, 0, math.rad(90))
+local function disc(parent, name, diameter, thickness, centerPos, color, material)
+	local d = makePart(parent, name, Vector3.new(thickness, diameter, diameter), CFrame.new(centerPos) * UPRIGHT, color, material)
+	d.Shape = Enum.PartType.Cylinder
+	return d
+end
+
+-- A point on the grass at a given angle and distance from the centre
+local function onGround(angle, dist, height)
+	return CENTER + Vector3.new(math.cos(angle) * dist, height or 0, math.sin(angle) * dist)
+end
+
+-- ===== The island =====
+disc(groundFolder, "Grass", RADIUS * 2, 4, CENTER - Vector3.new(0, 2, 0), Color3.fromRGB(70, 130, 105), Enum.Material.Grass)
+disc(groundFolder, "Soil", RADIUS * 2 + 3, 6, CENTER - Vector3.new(0, 6.5, 0), Color3.fromRGB(95, 70, 60), Enum.Material.Ground)
+-- the rocky underside narrows into a point
+for i = 1, 8 do
+	local d = RADIUS * 2 * (1 - i * 0.115)
+	local shade = 70 - i * 4
+	disc(decor, "Underside", d, 9, CENTER - Vector3.new(0, 9 + i * 8, 0), Color3.fromRGB(shade + 10, shade, shade + 25), Enum.Material.Slate)
+end
+
+-- a stone plaza around the well
+disc(groundFolder, "Plaza", 44, 0.4, CENTER + Vector3.new(0, 0.2, 0), Color3.fromRGB(150, 145, 170), Enum.Material.Cobblestone)
+
+-- Boulders around the edge, with gaps you can be knocked through
+for i = 1, 30 do
+	if rng:NextNumber() < 0.55 then
+		local a = (i / 30) * math.pi * 2 + rng:NextNumber(-0.05, 0.05)
+		local h = rng:NextNumber(1.6, 3.4)
+		local size = Vector3.new(rng:NextNumber(5, 9), h, rng:NextNumber(4, 7))
+		local pos = onGround(a, RADIUS - 3, h / 2)
+		local rock = makePart(decor, "EdgeRock", size, CFrame.lookAt(pos, CENTER + Vector3.new(0, h / 2, 0)), Color3.fromRGB(105, 100, 125), Enum.Material.Slate)
+		rock.CFrame *= CFrame.Angles(rng:NextNumber(-0.15, 0.15), 0, rng:NextNumber(-0.15, 0.15))
+	end
+end
+
+-- Star trees: dark trunks with softly glowing canopies
+local SPAWN_POS = CENTER + Vector3.new(0, 0.6, 72)
+local function farFromSpecialSpots(pos)
+	local flatSpawn = Vector3.new(pos.X - SPAWN_POS.X, 0, pos.Z - SPAWN_POS.Z).Magnitude
+	local flatCenter = Vector3.new(pos.X - CENTER.X, 0, pos.Z - CENTER.Z).Magnitude
+	return flatSpawn > 18 and flatCenter > 30
+end
+
+local placed = 0
+while placed < 11 do
+	local pos = onGround(rng:NextNumber(0, math.pi * 2), rng:NextNumber(32, RADIUS - 16))
+	if farFromSpecialSpots(pos) then
+		placed += 1
+		local h = rng:NextNumber(9, 14)
+		local trunk = makePart(decor, "Trunk", Vector3.new(h, 1.6, 1.6), CFrame.new(pos + Vector3.new(0, h / 2, 0)) * UPRIGHT, Color3.fromRGB(60, 40, 50), Enum.Material.Wood)
+		trunk.Shape = Enum.PartType.Cylinder
+		local hue = rng:NextNumber(0.72, 0.9)
+		for j = 1, 3 do
+			local s = rng:NextNumber(6, 9)
+			local leaf = makePart(decor, "Canopy", Vector3.new(s, s * 0.8, s),
+				CFrame.new(pos + Vector3.new(rng:NextNumber(-2, 2), h + rng:NextNumber(-1, 2), rng:NextNumber(-2, 2))),
+				Color3.fromHSV(hue, 0.45, 0.85), Enum.Material.Neon)
+			leaf.Shape = Enum.PartType.Ball
+			leaf.Transparency = 0.15
+			leaf.CanCollide = false
+			if j == 1 then
+				local light = Instance.new("PointLight")
+				light.Color = leaf.Color
+				light.Range = 16
+				light.Brightness = 0.8
+				light.Parent = leaf
+			end
+		end
+	end
+end
+
+-- Glowing crystal clusters
+placed = 0
+while placed < 9 do
+	local pos = onGround(rng:NextNumber(0, math.pi * 2), rng:NextNumber(26, RADIUS - 10))
+	if farFromSpecialSpots(pos) then
+		placed += 1
+		local color = rng:NextNumber() < 0.5 and Color3.fromRGB(120, 220, 255) or Color3.fromRGB(190, 130, 255)
+		for j = 1, 3 do
+			local h = rng:NextNumber(3, 6.5)
+			local crystal = makePart(decor, "Crystal", Vector3.new(1.3, h, 1.3),
+				CFrame.new(pos + Vector3.new(rng:NextNumber(-1.5, 1.5), h / 2 - 0.4, rng:NextNumber(-1.5, 1.5)))
+					* CFrame.Angles(rng:NextNumber(-0.35, 0.35), rng:NextNumber(0, 3), rng:NextNumber(-0.35, 0.35)),
+				color, Enum.Material.Neon)
+			crystal.CanCollide = false
+			if j == 1 then
+				local light = Instance.new("PointLight")
+				light.Color = color
+				light.Range = 12
+				light.Parent = crystal
+			end
+		end
+	end
+end
+
+-- ===== The Star Well =====
+local STONE = Color3.fromRGB(200, 195, 215)
+local WELL_GLOW = Color3.fromRGB(140, 230, 255)
+for i = 1, 24 do
+	local a = (i - 0.5) / 24 * math.pi * 2
+	local r = 9
+	local length = 2 * math.pi * r / 24 + 0.2
+	local pos = onGround(a, r, 1.1)
+	makePart(decor, "WellWall", Vector3.new(length, 2.2, 1.4), CFrame.lookAt(pos, CENTER + Vector3.new(0, 1.1, 0)), STONE, Enum.Material.Marble)
+end
+local water = disc(decor, "WellWater", 17, 0.6, CENTER + Vector3.new(0, 1.2, 0), WELL_GLOW, Enum.Material.Neon)
+water.Transparency = 0.2
+water.CanCollide = false
+local waterLight = Instance.new("PointLight")
+waterLight.Color = WELL_GLOW
+waterLight.Range = 40
+waterLight.Brightness = 2
+waterLight.Parent = water
+
+-- The beam of light: you can always find your way back to the well
+local beam = makePart(decor, "WellBeam", Vector3.new(500, 7, 7), CFrame.new(CENTER + Vector3.new(0, 250, 0)) * UPRIGHT, WELL_GLOW, Enum.Material.Neon)
+beam.Shape = Enum.PartType.Cylinder
+beam.Transparency = 0.8
+beam.CanCollide = false
+beam.CanQuery = false
+beam.CastShadow = false
+
+-- The well marker the game reads (invisible). Its particles burst when someone banks stars.
+local well = makePart(island, "StarWell", Vector3.new(2, 2, 2), CFrame.new(CENTER + Vector3.new(0, 1.5, 0)), WELL_GLOW)
+well.Transparency = 1
+well.CanCollide = false
+well.CanQuery = false
+well.CanTouch = false
+local guide = Instance.new("Attachment")
+guide.Name = "GuideAttachment"
+guide.Position = Vector3.new(0, 2, 0)
+guide.Parent = well
+local sparkle = Instance.new("ParticleEmitter")
+sparkle.Name = "Sparkle"
+sparkle.Color = ColorSequence.new(Color3.fromRGB(255, 250, 210), WELL_GLOW)
+sparkle.LightEmission = 1
+sparkle.Size = NumberSequence.new(0.5, 0)
+sparkle.Lifetime = NumberRange.new(1.5, 2.5)
+sparkle.Speed = NumberRange.new(4, 9)
+sparkle.SpreadAngle = Vector2.new(25, 25)
+sparkle.EmissionDirection = Enum.NormalId.Top
+sparkle.Rate = 10
+sparkle.Parent = well
+local burst = sparkle:Clone()
+burst.Name = "DepositBurst"
+burst.Rate = 0
+burst.Speed = NumberRange.new(18, 34)
+burst.Size = NumberSequence.new(0.9, 0)
+burst.Color = ColorSequence.new(Color3.fromRGB(255, 220, 90), Color3.fromRGB(255, 250, 210))
+burst.Parent = well
+
+-- ===== Spawn =====
+local spawn = Instance.new("SpawnLocation")
+spawn.Name = "IslandSpawn"
+spawn.Size = Vector3.new(10, 0.4, 10)
+spawn.CFrame = CFrame.lookAt(SPAWN_POS, Vector3.new(CENTER.X, SPAWN_POS.Y, CENTER.Z)) -- face the well
+spawn.Anchored = true
+spawn.Neutral = true
+spawn.Duration = 0
+spawn.Color = Color3.fromRGB(255, 220, 130)
+spawn.Material = Enum.Material.Neon
+spawn.Parent = island
+
+-- ===== Signs =====
+-- A board on two posts; the text is printed on the side facing `lookFrom`.
+local function signBoard(name, pos, lookFrom, size)
+	local base = CFrame.lookAt(pos, Vector3.new(lookFrom.X, pos.Y, lookFrom.Z)) -- front (-Z) faces the reader
+	local postHeight = size.Y * 0.35
+	for _, dx in ipairs({ -size.X * 0.38, size.X * 0.38 }) do
+		makePart(decor, name .. "Post", Vector3.new(1.2, postHeight + 1, 1.2), base * CFrame.new(dx, postHeight / 2, 0.6), Color3.fromRGB(60, 50, 70), Enum.Material.Wood)
+	end
+	local board = makePart(island, name, size, base * CFrame.new(0, postHeight + size.Y / 2, 0), Color3.fromRGB(25, 22, 45))
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = "BoardGui"
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 25
+	gui.LightInfluence = 0
+	gui.Parent = board
+	return board, gui
+end
+
+local function guiText(parent, text, pos, size, textSize, color, font, align)
+	local l = Instance.new("TextLabel")
+	l.BackgroundTransparency = 1
+	l.Position = pos
+	l.Size = size
+	l.Text = text
+	l.TextColor3 = color
+	l.Font = font or Enum.Font.GothamBold
+	l.TextSize = textSize
+	l.TextWrapped = true
+	l.TextXAlignment = align or Enum.TextXAlignment.Center
+	l.TextYAlignment = Enum.TextYAlignment.Top
+	l.Parent = parent
+	return l
+end
+
+local GOLD = Color3.fromRGB(255, 205, 80)
+local WHITE = Color3.new(1, 1, 1)
+local SOFT = Color3.fromRGB(200, 195, 230)
+
+-- How to play, beside the spawn
+do
+	local _, gui = signBoard("HowToSign", SPAWN_POS + Vector3.new(-17, -0.6, -8), SPAWN_POS, Vector3.new(18, 12, 1))
+	guiText(gui, "STARFALL SCRAMBLE", UDim2.fromOffset(0, 18), UDim2.new(1, 0, 0, 44), 36, GOLD, Enum.Font.FredokaOne)
+	guiText(gui,
+		"1. Run into falling stars to fill your bag.\n" ..
+		"2. Bank them at the glowing Star Well for Stardust.\n" ..
+		"3. Dodge meteors! Red circles show where they land.\n" ..
+		"    A hit spills half your bag. Falling off loses it all.\n" ..
+		"4. Spend Stardust on upgrades. Go Supernova to earn faster forever.",
+		UDim2.fromOffset(24, 76), UDim2.new(1, -48, 1, -90), 21, WHITE, Enum.Font.GothamMedium, Enum.TextXAlignment.Left)
+end
+
+-- The all-time leaderboard (filled in by StarBoard), behind the well as seen from the spawn
+do
+	local boardPos = CENTER + Vector3.new(0, 0, -34)
+	local board, gui = signBoard("LeaderBoard", boardPos, CENTER + Vector3.new(0, 0, 40), Vector3.new(20, 18, 1))
+	board.Name = "LeaderBoard"
+	guiText(gui, "BRIGHTEST STAR CATCHERS", UDim2.fromOffset(0, 16), UDim2.new(1, 0, 0, 40), 30, GOLD, Enum.Font.FredokaOne)
+	guiText(gui, "Lifetime Stardust, all servers", UDim2.fromOffset(0, 54), UDim2.new(1, 0, 0, 24), 18, SOFT, Enum.Font.GothamMedium)
+	local rows = Instance.new("Frame")
+	rows.Name = "Rows"
+	rows.BackgroundTransparency = 1
+	rows.Position = UDim2.fromOffset(24, 90)
+	rows.Size = UDim2.new(1, -48, 1, -104)
+	rows.Parent = gui
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 4)
+	layout.Parent = rows
+	for i = 1, 10 do
+		local row = Instance.new("Frame")
+		row.Name = "Row" .. i
+		row.LayoutOrder = i
+		row.Size = UDim2.new(1, 0, 0.1, -4)
+		row.BackgroundColor3 = i % 2 == 0 and Color3.fromRGB(38, 34, 66) or Color3.fromRGB(32, 28, 58)
+		row.BorderSizePixel = 0
+		row.Parent = rows
+		local who = guiText(row, i == 1 and "Be the first!" or "", UDim2.fromOffset(12, 0), UDim2.new(0.65, -12, 1, 0), 22,
+			i <= 3 and GOLD or WHITE, Enum.Font.GothamBold, Enum.TextXAlignment.Left)
+		who.Name = "Who"
+		who.TextYAlignment = Enum.TextYAlignment.Center
+		who.TextTruncate = Enum.TextTruncate.AtEnd
+		who.TextWrapped = false
+		local amount = guiText(row, "", UDim2.new(0.65, 0, 0, 0), UDim2.new(0.35, -12, 1, 0), 22, SOFT, Enum.Font.GothamBold, Enum.TextXAlignment.Right)
+		amount.Name = "Amount"
+		amount.TextYAlignment = Enum.TextYAlignment.Center
+	end
+end
+
+-- Values the game scripts read
+island:SetAttribute("Center", CENTER)
+island:SetAttribute("Radius", RADIUS)
+island:SetAttribute("GroundY", CENTER.Y)
+island:SetAttribute("WellRadius", WELL_RADIUS)
+island.Parent = workspace
+
+-- Players should fall into the void, not onto the default Baseplate
+local baseplate = workspace:FindFirstChild("Baseplate")
+if baseplate then
+	baseplate:Destroy()
+end
+for _, inst in ipairs(workspace:GetDescendants()) do
+	if inst:IsA("SpawnLocation") and inst ~= spawn then
+		inst.Enabled = false
+	end
+end
+
+-- ===== Night sky =====
+Lighting.ClockTime = 0
+Lighting.Brightness = 2
+Lighting.Ambient = Color3.fromRGB(70, 60, 110)
+Lighting.OutdoorAmbient = Color3.fromRGB(120, 110, 170)
+Lighting.GlobalShadows = true
+if not Lighting:FindFirstChildOfClass("Atmosphere") then
+	local atmosphere = Instance.new("Atmosphere")
+	atmosphere.Density = 0.28
+	atmosphere.Color = Color3.fromRGB(120, 100, 200)
+	atmosphere.Decay = Color3.fromRGB(60, 40, 120)
+	atmosphere.Glare = 0
+	atmosphere.Haze = 1
+	atmosphere.Parent = Lighting
+end
+if not Lighting:FindFirstChildOfClass("BloomEffect") then
+	local bloom = Instance.new("BloomEffect")
+	bloom.Intensity = 0.8
+	bloom.Size = 28
+	bloom.Threshold = 0.9
+	bloom.Parent = Lighting
+end
+]]></string>
+      </Properties>
+    </Item>
+    <Item class="Script" referent="4">
+      <Properties>
+        <string name="Name">StarBoard</string>
+        <token name="RunContext">0</token>
+        <string name="Source"><![CDATA[-- PLACE IN: ServerScriptService
+-- TYPE: Script
+-- NAME: StarBoard
+-- Fills in the "Brightest Star Catchers" board on the island: the top 10 players by lifetime
+-- Stardust across every server. Players in this server are mixed in live, so the board also
+-- works in Studio before the place is published (it then shows just this server).
+
+local Players = game:GetService("Players")
+local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local StarConfig = require(ReplicatedStorage:WaitForChild("StarConfig"))
+local StarData = require(ServerScriptService:WaitForChild("StarData"))
+
+local REFRESH_EVERY = 60 -- seconds; OrderedDataStore reads are rate limited
+
+local island = workspace:WaitForChild("StarfallIsland")
+local board = island:WaitForChild("LeaderBoard", 30)
+if not board then
+	warn("[StarBoard] no LeaderBoard part on the island, so there's no board to fill in.")
+	return
+end
+local rows = board:WaitForChild("BoardGui"):WaitForChild("Rows")
+
+local nameCache = {}
+local function nameOf(userId)
+	if nameCache[userId] then
+		return nameCache[userId]
+	end
+	local online = Players:GetPlayerByUserId(userId)
+	if online then
+		nameCache[userId] = online.DisplayName
+		return online.DisplayName
+	end
+	local ok, name = pcall(function()
+		return Players:GetNameFromUserIdAsync(userId)
+	end)
+	if ok and name then
+		nameCache[userId] = name
+		return name
+	end
+	return "Player " .. userId
+end
+
+local saved = {} -- [userId] = lifetime Stardust, from the last read of the global board
+
+local function readGlobal()
+	local store = StarData.Board
+	if not store then return end
+	local ok, page = pcall(function()
+		return store:GetSortedAsync(false, 10):GetCurrentPage()
+	end)
+	if not ok then
+		warn("[StarBoard] couldn't read the leaderboard:", page)
+		return
+	end
+	table.clear(saved)
+	for _, entry in ipairs(page) do
+		local userId = tonumber(entry.key)
+		if userId then
+			saved[userId] = entry.value
+		end
+	end
+end
+
+local function render()
+	local best = table.clone(saved)
+	for player, profile in pairs(StarData.Profiles) do
+		if (best[player.UserId] or 0) < profile.Total then
+			best[player.UserId] = profile.Total
+		end
+	end
+
+	local list = {}
+	for userId, total in pairs(best) do
+		if total > 0 then
+			table.insert(list, { UserId = userId, Total = total })
+		end
+	end
+	table.sort(list, function(a, b) return a.Total > b.Total end)
+
+	for i = 1, 10 do
+		local row = rows:FindFirstChild("Row" .. i)
+		if row then
+			local entry = list[i]
+			row.Who.Text = entry and string.format("%d. %s", i, nameOf(entry.UserId)) or (i == 1 and "Be the first!" or "")
+			row.Amount.Text = entry and StarConfig.Commas(entry.Total) or ""
+		end
+	end
+end
+
+task.spawn(function()
+	local lastRead = -math.huge
+	while true do
+		if os.clock() - lastRead >= REFRESH_EVERY then
+			lastRead = os.clock()
+			readGlobal()
+		end
+		render() -- local players update every few seconds
+		task.wait(5)
+	end
+end)
+]]></string>
+      </Properties>
+    </Item>
+    <Item class="ModuleScript" referent="5">
+      <Properties>
+        <string name="Name">StarData</string>
+        <string name="Source"><![CDATA[-- PLACE IN: ServerScriptService
+-- TYPE: ModuleScript
+-- NAME: StarData
+-- Each player's saved progress: Stardust, upgrades, Supernovas and lifetime Stardust.
+-- Stars in your bag (Carried) are NOT saved: bank them at the Star Well or lose them.
+--
+-- Saving needs a published place (File > Publish to Roblox). To test saving in Studio, also
+-- turn on Game Settings > Security > "Enable Studio Access to API Services".
+-- If loading fails the player can still play, but that session will NOT save, so an outage
+-- can never overwrite real progress with a blank profile.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local DataStoreService = game:GetService("DataStoreService")
+
+local StarConfig = require(ReplicatedStorage:WaitForChild("StarConfig"))
+
+local STORE_NAME = "StarfallScramble_v1"            -- bump the version to wipe everyone's data
+local BOARD_NAME = "StarfallScramble_Lifetime_v1"   -- the all-time leaderboard
+local AUTOSAVE_INTERVAL = 120
+local SAVE_DELAY = 6 -- seconds after a change before it's written
+
+-- These throw if the place isn't published. Fall back to "no saving" so the game still runs.
+local storeOk, store = pcall(function()
+	return DataStoreService:GetDataStore(STORE_NAME)
+end)
+if not storeOk then
+	warn("[StarData] DataStore unavailable (publish the place to enable saving). Running without saving.")
+	store = nil
+end
+local boardOk, board = pcall(function()
+	return DataStoreService:GetOrderedDataStore(BOARD_NAME)
+end)
+if not boardOk then
+	board = nil
+end
+
+local StarData = {}
+StarData.Profiles = {}
+StarData.Board = board -- read by StarBoard (nil when saving is off)
+
+-- Fires (player) once a profile is ready
+StarData.Loaded = Instance.new("BindableEvent")
+
+local function blankUpgrades()
+	local t = {}
+	for _, def in ipairs(StarConfig.Upgrades) do
+		t[def.Id] = 0
+	end
+	return t
+end
+
+function StarData.Get(player)
+	return StarData.Profiles[player]
+end
+
+function StarData.Capacity(profile)
+	return StarConfig.Capacity(profile.Upgrades.Bag)
+end
+
+-- Mirrors the profile onto player attributes (read by the HUD) and the player list
+function StarData.Sync(player)
+	local profile = StarData.Profiles[player]
+	if not profile then return end
+
+	player:SetAttribute("Stardust", profile.Stardust)
+	player:SetAttribute("Carried", profile.Carried)
+	player:SetAttribute("Capacity", StarData.Capacity(profile))
+	player:SetAttribute("Supernovas", profile.Supernovas)
+	player:SetAttribute("Lifetime", profile.Total)
+	for id, level in pairs(profile.Upgrades) do
+		player:SetAttribute("Up_" .. id, level)
+	end
+
+	local stats = player:FindFirstChild("leaderstats")
+	if not stats then
+		stats = Instance.new("Folder")
+		stats.Name = "leaderstats"
+		local dust = Instance.new("IntValue")
+		dust.Name = "Stardust"
+		dust.Parent = stats
+		local novas = Instance.new("IntValue")
+		novas.Name = "Supernovas"
+		novas.Parent = stats
+		stats.Parent = player
+	end
+	stats.Stardust.Value = profile.Stardust
+	stats.Supernovas.Value = profile.Supernovas
+
+	-- Moon Boots
+	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = StarConfig.Speed(profile.Upgrades.Speed)
+	end
+end
+
+local function loadFromStore(userId)
+	if not store then
+		return false, nil
+	end
+	for _ = 1, 3 do
+		local ok, result = pcall(function()
+			return store:GetAsync("Player_" .. userId)
+		end)
+		if ok then
+			return true, result
+		end
+		warn("[StarData] load failed:", result)
+		task.wait(1)
+	end
+	return false, nil
+end
+
+function StarData.Load(player)
+	local ok, saved = loadFromStore(player.UserId)
+	if not player.Parent then return end -- left while loading
+
+	local profile = {
+		Stardust = 0,
+		Total = 0,
+		Supernovas = 0,
+		Upgrades = blankUpgrades(),
+		Carried = 0,
+		PostedTotal = 0,
+		SavePending = false,
+		CanSave = ok, -- never save over a profile we failed to load
+	}
+
+	if ok and type(saved) == "table" then
+		profile.Stardust = math.max(0, math.floor(tonumber(saved.Stardust) or 0))
+		profile.Total = math.max(0, math.floor(tonumber(saved.Total) or 0))
+		profile.Supernovas = math.max(0, math.floor(tonumber(saved.Supernovas) or 0))
+		profile.PostedTotal = profile.Total
+		if type(saved.Upgrades) == "table" then
+			for _, def in ipairs(StarConfig.Upgrades) do
+				local level = tonumber(saved.Upgrades[def.Id])
+				if level then
+					profile.Upgrades[def.Id] = math.clamp(math.floor(level), 0, def.Max)
+				end
+			end
+		end
+	end
+
+	StarData.Profiles[player] = profile
+	StarData.Sync(player)
+	StarData.Loaded:Fire(player)
+end
+
+function StarData.Save(player)
+	local profile = StarData.Profiles[player]
+	if not store or not profile or not profile.CanSave then return end
+
+	local ok, err = pcall(function()
+		store:UpdateAsync("Player_" .. player.UserId, function()
+			return {
+				Stardust = profile.Stardust,
+				Total = profile.Total,
+				Supernovas = profile.Supernovas,
+				Upgrades = table.clone(profile.Upgrades),
+			}
+		end)
+	end)
+	if not ok then
+		warn("[StarData] save failed:", err)
+	end
+
+	-- the all-time leaderboard only ever goes up
+	if board and profile.Total > profile.PostedTotal then
+		local total = profile.Total
+		local boardSaved = pcall(function()
+			board:SetAsync(tostring(player.UserId), total)
+		end)
+		if boardSaved then
+			profile.PostedTotal = total
+		end
+	end
+end
+
+-- Saves a few seconds from now (many changes in a row become one write)
+function StarData.RequestSave(player)
+	local profile = StarData.Profiles[player]
+	if not profile or profile.SavePending then return end
+	profile.SavePending = true
+	task.delay(SAVE_DELAY, function()
+		profile.SavePending = false
+		if StarData.Profiles[player] == profile then
+			StarData.Save(player)
+		end
+	end)
+end
+
+function StarData.Changed(player)
+	StarData.Sync(player)
+	StarData.RequestSave(player)
+end
+
+Players.PlayerAdded:Connect(StarData.Load)
+for _, p in ipairs(Players:GetPlayers()) do
+	task.spawn(StarData.Load, p)
+end
+
+Players.PlayerRemoving:Connect(function(player)
+	StarData.Save(player)
+	StarData.Profiles[player] = nil
+end)
+
+task.spawn(function()
+	while true do
+		task.wait(AUTOSAVE_INTERVAL)
+		for player in pairs(StarData.Profiles) do
+			task.spawn(StarData.Save, player)
+		end
+	end
+end)
+
+game:BindToClose(function()
+	local pending = 0
+	for player in pairs(StarData.Profiles) do
+		pending += 1
+		task.spawn(function()
+			StarData.Save(player)
+			pending -= 1
+		end)
+	end
+	local started = os.clock()
+	while pending > 0 and os.clock() - started < 25 do
+		task.wait()
+	end
+end)
+
+return StarData
+]]></string>
+      </Properties>
+    </Item>
+    <Item class="Script" referent="6">
+      <Properties>
+        <string name="Name">StarService</string>
+        <token name="RunContext">0</token>
+        <string name="Source"><![CDATA[-- PLACE IN: ServerScriptService
+-- TYPE: Script
+-- NAME: StarService
+-- Runs the game: stars falling from the sky, grabbing them, banking them at the Star Well,
+-- meteors, falling off the island, timed events, upgrades and Supernova (rebirth).
+-- Everything that matters is decided here on the server; the client only shows it.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+
+local StarConfig = require(ReplicatedStorage:WaitForChild("StarConfig"))
+local StarData = require(ServerScriptService:WaitForChild("StarData"))
+
+local island = workspace:WaitForChild("StarfallIsland")
+local CENTER = island:GetAttribute("Center")
+local RADIUS = island:GetAttribute("Radius")
+local GROUND_Y = island:GetAttribute("GroundY")
+local WELL_RADIUS = island:GetAttribute("WellRadius")
+local well = island:WaitForChild("StarWell")
+local depositBurst = well:FindFirstChild("DepositBurst")
+
+local FALL_OFF_DEPTH = 60      -- studs below the grass that count as "fell off"
+local CHECK_INTERVAL = 0.1     -- how often pickups, banking and falls are checked
+local REMOTE_COOLDOWN = 0.2    -- seconds between shop clicks per player
+
+-- ===== Remotes =====
+local remotes = Instance.new("Folder")
+remotes.Name = "StarfallRemotes"
+local buyRemote = Instance.new("RemoteFunction")
+buyRemote.Name = "BuyUpgrade"
+buyRemote.Parent = remotes
+local supernovaRemote = Instance.new("RemoteFunction")
+supernovaRemote.Name = "Supernova"
+supernovaRemote.Parent = remotes
+-- server -> client: { Kind = "Collect" | "Deposit" | "Hit" | "FellOff" | "Announce", ... }
+local notify = Instance.new("RemoteEvent")
+notify.Name = "Notify"
+notify.Parent = remotes
+-- server -> client: fling your own character (clients own their character's physics)
+local knockback = Instance.new("RemoteEvent")
+knockback.Name = "Knockback"
+knockback.Parent = remotes
+remotes.Parent = ReplicatedStorage
+
+local starsFolder = Instance.new("Folder")
+starsFolder.Name = "Stars"
+starsFolder.Parent = workspace
+local meteorFolder = Instance.new("Folder")
+meteorFolder.Name = "Meteors"
+meteorFolder.Parent = workspace
+
+-- ===== Events =====
+local currentEvent = nil -- nil, or a key of StarConfig.Events
+
+local function settings()
+	return currentEvent and StarConfig.Events[currentEvent] or StarConfig.Normal
+end
+
+-- ===== Stars =====
+local stars = {} -- [part] = { Value, Name, Landed, LandedAt, Taken }
+local starCount = 0
+
+local function rollStar()
+	local weights = settings().Weights or {}
+	local total = 0
+	for _, def in ipairs(StarConfig.Stars) do
+		total += def.Weight * (weights[def.Name] or 1)
+	end
+	local r = math.random() * total
+	for _, def in ipairs(StarConfig.Stars) do
+		r -= def.Weight * (weights[def.Name] or 1)
+		if r <= 0 then
+			return def
+		end
+	end
+	return StarConfig.Stars[1]
+end
+
+local function randomGroundSpot()
+	while true do
+		local a = math.random() * math.pi * 2
+		local r = math.sqrt(math.random()) * (RADIUS - 12)
+		if r > WELL_RADIUS + 5 then
+			return Vector3.new(CENTER.X + math.cos(a) * r, GROUND_Y, CENTER.Z + math.sin(a) * r)
+		end
+	end
+end
+
+-- Drops a star onto `ground`. opts.Value overrides its value, opts.From is where it falls from.
+local function spawnStar(def, ground, opts)
+	opts = opts or {}
+	local value = opts.Value or def.Value
+	local landing = ground + Vector3.new(0, def.Size / 2 + 0.6, 0)
+
+	local p = Instance.new("Part")
+	p.Name = def.Name
+	p.Shape = Enum.PartType.Ball
+	p.Material = Enum.Material.Neon
+	p.Color = def.Color
+	p.Size = Vector3.one * def.Size
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanQuery = false
+	p.CanTouch = false
+	p.CastShadow = false
+	p.Position = opts.From or (landing + Vector3.new(math.random(-35, 35), 140, math.random(-35, 35)))
+	p:SetAttribute("Value", value)
+	p:SetAttribute("BaseY", landing.Y)
+	if def.Rainbow then
+		p:SetAttribute("Rainbow", true)
+	end
+
+	local light = Instance.new("PointLight")
+	light.Color = def.Color
+	light.Range = 6 + def.Size * 2
+	light.Brightness = 1.4
+	light.Parent = p
+
+	local a0 = Instance.new("Attachment")
+	a0.Position = Vector3.new(0, def.Size * 0.4, 0)
+	a0.Parent = p
+	local a1 = Instance.new("Attachment")
+	a1.Position = Vector3.new(0, -def.Size * 0.4, 0)
+	a1.Parent = p
+	local trail = Instance.new("Trail")
+	trail.Attachment0 = a0
+	trail.Attachment1 = a1
+	trail.Color = ColorSequence.new(def.Color)
+	trail.LightEmission = 1
+	trail.Lifetime = 0.35
+	trail.Transparency = NumberSequence.new(0.1, 1)
+	trail.Parent = p
+
+	p.Parent = starsFolder
+	local info = { Value = value, Name = def.Name, Landed = false, LandedAt = 0, Taken = false }
+	stars[p] = info
+	starCount += 1
+
+	local tween = TweenService:Create(p, TweenInfo.new(opts.Time or StarConfig.FallTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Position = landing })
+	tween.Completed:Connect(function()
+		if stars[p] == info then
+			info.Landed = true
+			info.LandedAt = os.clock()
+			trail.Enabled = false
+			p:SetAttribute("Landed", true)
+		end
+	end)
+	tween:Play()
+end
+
+local function removeStar(p)
+	if stars[p] then
+		stars[p] = nil
+		starCount -= 1
+	end
+end
+
+-- Old stars fade away so the island doesn't fill up
+task.spawn(function()
+	while true do
+		task.wait(1)
+		local now = os.clock()
+		for p, info in pairs(stars) do
+			if info.Landed and now - info.LandedAt > StarConfig.StarLifetime then
+				removeStar(p)
+				TweenService:Create(p, TweenInfo.new(0.6), { Transparency = 1, Size = Vector3.one * 0.2 }):Play()
+				Debris:AddItem(p, 0.7)
+			end
+		end
+	end
+end)
+
+-- The star rain
+task.spawn(function()
+	while true do
+		local playerCount = math.clamp(#Players:GetPlayers(), 1, 9)
+		task.wait(settings().SpawnInterval / math.sqrt(playerCount))
+		if starCount < StarConfig.MaxStars and #Players:GetPlayers() > 0 then
+			spawnStar(rollStar(), randomGroundSpot())
+		end
+	end
+end)
+
+-- Breaks `amount` stars into a few stars that spill around `pos` (from a meteor hit)
+local function spill(pos, amount)
+	local pieces = math.clamp(math.ceil(amount / 10), 1, 8)
+	local each = math.floor(amount / pieces)
+	local extra = amount - each * pieces
+	for i = 1, pieces do
+		local value = each + (i <= extra and 1 or 0)
+		if value > 0 then
+			-- look like the biggest star type this chunk is worth
+			local def = StarConfig.Stars[1]
+			for _, d in ipairs(StarConfig.Stars) do
+				if value >= d.Value then def = d end
+			end
+			local a = math.random() * math.pi * 2
+			local dist = math.random(6, 16)
+			local spot = Vector3.new(pos.X + math.cos(a) * dist, GROUND_Y, pos.Z + math.sin(a) * dist)
+			local flat = Vector3.new(spot.X - CENTER.X, 0, spot.Z - CENTER.Z)
+			if flat.Magnitude > RADIUS - 6 then
+				spot = Vector3.new(CENTER.X, GROUND_Y, CENTER.Z) + flat.Unit * (RADIUS - 6)
+			end
+			spawnStar(def, spot, { Value = value, From = pos + Vector3.new(0, 6, 0), Time = 0.6 })
+		end
+	end
+end
+
+-- ===== Grabbing, banking, falling off =====
+local function rootOf(player)
+	local char = player.Character
+	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then return nil end
+	return char:FindFirstChild("HumanoidRootPart")
+end
+
+local function collect(player, profile, part, info, hrp)
+	info.Taken = true
+	removeStar(part)
+
+	local value = info.Value
+	local lucky = math.random() < StarConfig.LuckChance(profile.Upgrades.Luck)
+	if lucky then
+		value *= 2
+	end
+	profile.Carried = math.min(StarData.Capacity(profile), profile.Carried + value)
+	StarData.Sync(player)
+	notify:FireClient(player, { Kind = "Collect", Value = value, Star = info.Name, Lucky = lucky })
+
+	-- the star zips into the player, then pops
+	part:SetAttribute("Collecting", true)
+	local zip = TweenService:Create(part, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{ Position = hrp.Position, Size = Vector3.one * 0.3 })
+	zip.Completed:Connect(function()
+		part:Destroy()
+	end)
+	zip:Play()
+end
+
+local function deposit(player, profile)
+	local gained = math.floor(profile.Carried * StarConfig.Multiplier(profile.Supernovas))
+	local banked = profile.Carried
+	profile.Carried = 0
+	profile.Stardust += gained
+	profile.Total += gained
+	StarData.Changed(player)
+	notify:FireClient(player, { Kind = "Deposit", Stars = banked, Stardust = gained })
+	if depositBurst then
+		depositBurst:Emit(math.clamp(math.floor(banked / 4), 12, 60))
+	end
+end
+
+local respawning = {} -- [player] = true while their new character loads
+local function fellOff(player, profile)
+	if respawning[player] then return end
+	respawning[player] = true
+	local lost = profile.Carried
+	profile.Carried = 0
+	StarData.Sync(player)
+	notify:FireClient(player, { Kind = "FellOff", Lost = lost })
+	task.spawn(function()
+		pcall(player.LoadCharacter, player)
+		respawning[player] = nil
+	end)
+end
+
+task.spawn(function()
+	local wellPos = well.Position
+	while true do
+		task.wait(CHECK_INTERVAL)
+		for _, player in ipairs(Players:GetPlayers()) do
+			local profile = StarData.Get(player)
+			local hrp = rootOf(player)
+			if not profile or not hrp then continue end
+			local pos = hrp.Position
+
+			if pos.Y < GROUND_Y - FALL_OFF_DEPTH then
+				fellOff(player, profile)
+				continue
+			end
+
+			-- bank at the well
+			local toWell = Vector3.new(pos.X - wellPos.X, 0, pos.Z - wellPos.Z).Magnitude
+			if toWell <= WELL_RADIUS and math.abs(pos.Y - GROUND_Y) < 14 and profile.Carried > 0 then
+				deposit(player, profile)
+			end
+
+			-- grab stars in magnet range
+			local capacity = StarData.Capacity(profile)
+			if profile.Carried < capacity then
+				local range = StarConfig.Magnet(profile.Upgrades.Magnet)
+				for part, info in pairs(stars) do
+					if info.Landed and not info.Taken and (part.Position - pos).Magnitude <= range + part.Size.X / 2 then
+						collect(player, profile, part, info, hrp)
+						if profile.Carried >= capacity then break end
+					end
+				end
+			end
+		end
+	end
+end)
+
+-- ===== Meteors =====
+local function meteorHit(player, profile, impact)
+	local hrp = rootOf(player)
+	if not hrp then return end
+	local lost = math.floor(profile.Carried * StarConfig.MeteorDropShare)
+	if lost > 0 then
+		profile.Carried -= lost
+		StarData.Sync(player)
+		spill(hrp.Position, lost)
+	end
+	local away = Vector3.new(hrp.Position.X - impact.X, 0, hrp.Position.Z - impact.Z)
+	away = away.Magnitude > 0.1 and away.Unit or Vector3.new(1, 0, 0)
+	knockback:FireClient(player, away * 70 + Vector3.new(0, 55, 0))
+	notify:FireClient(player, { Kind = "Hit", Lost = lost })
+end
+
+local function launchMeteor(target)
+	local radius = StarConfig.MeteorRadius
+
+	-- the red warning circle, pulsing faster as impact nears
+	local warning = Instance.new("Part")
+	warning.Name = "MeteorWarning"
+	warning.Shape = Enum.PartType.Cylinder
+	warning.Material = Enum.Material.Neon
+	warning.Color = Color3.fromRGB(255, 50, 50)
+	warning.Size = Vector3.new(0.2, radius * 2, radius * 2)
+	warning.CFrame = CFrame.new(target + Vector3.new(0, 0.25, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	warning.Transparency = 0.65
+	warning.Anchored = true
+	warning.CanCollide = false
+	warning.CanQuery = false
+	warning.CanTouch = false
+	warning.CastShadow = false
+	warning.Parent = meteorFolder
+	local inner = warning:Clone()
+	inner.Size = Vector3.new(0.22, 1, 1)
+	inner.Transparency = 0.3
+	inner.Parent = meteorFolder
+	TweenService:Create(inner, TweenInfo.new(StarConfig.MeteorWarning, Enum.EasingStyle.Linear), { Size = Vector3.new(0.22, radius * 2, radius * 2) }):Play()
+
+	task.wait(StarConfig.MeteorWarning - 0.55)
+
+	-- the meteor streaks in at an angle
+	local dir = math.random() * math.pi * 2
+	local meteor = Instance.new("Part")
+	meteor.Name = "Meteor"
+	meteor.Shape = Enum.PartType.Ball
+	meteor.Material = Enum.Material.Basalt
+	meteor.Color = Color3.fromRGB(70, 40, 35)
+	meteor.Size = Vector3.one * 6
+	meteor.Anchored = true
+	meteor.CanCollide = false
+	meteor.CanQuery = false
+	meteor.CanTouch = false
+	meteor.Position = target + Vector3.new(math.cos(dir) * 70, 170, math.sin(dir) * 70)
+	local fire = Instance.new("Fire")
+	fire.Size = 12
+	fire.Heat = 20
+	fire.Color = Color3.fromRGB(255, 130, 40)
+	fire.SecondaryColor = Color3.fromRGB(255, 60, 20)
+	fire.Parent = meteor
+	local glow = Instance.new("PointLight")
+	glow.Color = Color3.fromRGB(255, 120, 50)
+	glow.Range = 30
+	glow.Brightness = 3
+	glow.Parent = meteor
+	meteor.Parent = meteorFolder
+	TweenService:Create(meteor, TweenInfo.new(0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Position = target }):Play()
+	task.wait(0.55)
+
+	warning:Destroy()
+	inner:Destroy()
+	meteor:Destroy()
+
+	-- a harmless explosion for looks and sound (it can't break joints or kill)
+	local boom = Instance.new("Explosion")
+	boom.Position = target
+	boom.BlastRadius = radius
+	boom.BlastPressure = 0
+	boom.DestroyJointRadiusPercent = 0
+	boom.ExplosionType = Enum.ExplosionType.NoCraters
+	boom.Parent = workspace
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		local profile = StarData.Get(player)
+		local hrp = rootOf(player)
+		if profile and hrp then
+			local flat = Vector3.new(hrp.Position.X - target.X, 0, hrp.Position.Z - target.Z).Magnitude
+			if flat <= radius + 1.5 and math.abs(hrp.Position.Y - target.Y) < 12 then
+				meteorHit(player, profile, target)
+			end
+		end
+	end
+end
+
+-- Meteors never land on the well: the well is your safe spot
+local function pickMeteorTarget()
+	local players = Players:GetPlayers()
+	if #players > 0 and math.random() < StarConfig.MeteorAimAtPlayers then
+		local hrp = rootOf(players[math.random(#players)])
+		if hrp and math.abs(hrp.Position.Y - GROUND_Y) < 10 then
+			local spot = Vector3.new(hrp.Position.X + math.random(-4, 4), GROUND_Y, hrp.Position.Z + math.random(-4, 4))
+			local fromWell = Vector3.new(spot.X - CENTER.X, 0, spot.Z - CENTER.Z).Magnitude
+			if fromWell > WELL_RADIUS + StarConfig.MeteorRadius then
+				return spot
+			end
+		end
+	end
+	return randomGroundSpot()
+end
+
+task.spawn(function()
+	task.wait(8) -- a calm start for the first player
+	while true do
+		local delay = settings().MeteorDelay
+		task.wait(delay[1] + math.random() * (delay[2] - delay[1]))
+		if #Players:GetPlayers() > 0 then
+			task.spawn(launchMeteor, pickMeteorTarget())
+		end
+	end
+end)
+
+-- ===== Timed events =====
+-- The HUD reads these workspace attributes: StarEvent, StarEventEnds, NextStarEvent
+task.spawn(function()
+	local index = 0
+	workspace:SetAttribute("StarEvent", "")
+	while true do
+		workspace:SetAttribute("NextStarEvent", workspace:GetServerTimeNow() + StarConfig.EventEvery)
+		task.wait(StarConfig.EventEvery)
+		index = index % #StarConfig.EventOrder + 1
+		currentEvent = StarConfig.EventOrder[index]
+		workspace:SetAttribute("StarEventEnds", workspace:GetServerTimeNow() + StarConfig.EventLength)
+		workspace:SetAttribute("StarEvent", currentEvent)
+		task.wait(StarConfig.EventLength)
+		currentEvent = nil
+		workspace:SetAttribute("StarEvent", "")
+	end
+end)
+
+-- ===== Shop and Supernova =====
+local lastRemote = {}
+local function tooFast(player)
+	local now = os.clock()
+	if lastRemote[player] and now - lastRemote[player] < REMOTE_COOLDOWN then
+		return true
+	end
+	lastRemote[player] = now
+	return false
+end
+
+buyRemote.OnServerInvoke = function(player, upgradeId)
+	if typeof(upgradeId) ~= "string" then
+		return { Success = false, Error = "Bad request." }
+	end
+	if tooFast(player) then
+		return { Success = false, Error = "Slow down!" }
+	end
+	local profile = StarData.Get(player)
+	if not profile then
+		return { Success = false, Error = "Still loading your stars..." }
+	end
+	local def = StarConfig.UpgradeById[upgradeId]
+	if not def then
+		return { Success = false, Error = "Unknown upgrade." }
+	end
+	local level = profile.Upgrades[upgradeId]
+	if level >= def.Max then
+		return { Success = false, Error = def.Name .. " is maxed out!" }
+	end
+	local cost = StarConfig.UpgradeCost(def, level)
+	if profile.Stardust < cost then
+		return { Success = false, Error = "You need " .. StarConfig.Commas(cost - profile.Stardust) .. " more Stardust." }
+	end
+	profile.Stardust -= cost
+	profile.Upgrades[upgradeId] = level + 1
+	StarData.Changed(player)
+	return { Success = true }
+end
+
+supernovaRemote.OnServerInvoke = function(player)
+	if tooFast(player) then
+		return { Success = false, Error = "Slow down!" }
+	end
+	local profile = StarData.Get(player)
+	if not profile then
+		return { Success = false, Error = "Still loading your stars..." }
+	end
+	local cost = StarConfig.SupernovaCost(profile.Supernovas)
+	if profile.Stardust < cost then
+		return { Success = false, Error = "You need " .. StarConfig.Commas(cost - profile.Stardust) .. " more Stardust." }
+	end
+
+	profile.Supernovas += 1
+	profile.Stardust = 0
+	profile.Carried = 0
+	for id in pairs(profile.Upgrades) do
+		profile.Upgrades[id] = 0
+	end
+	StarData.Changed(player)
+	StarData.Save(player) -- a rebirth is worth saving straight away
+
+	local hrp = rootOf(player)
+	if hrp then
+		local boom = Instance.new("Explosion")
+		boom.Position = hrp.Position
+		boom.BlastRadius = 8
+		boom.BlastPressure = 0
+		boom.DestroyJointRadiusPercent = 0
+		boom.ExplosionType = Enum.ExplosionType.NoCraters
+		boom.Parent = workspace
+	end
+	notify:FireAllClients({
+		Kind = "Announce",
+		Text = string.format("%s went SUPERNOVA! (x%g Stardust)", player.DisplayName, StarConfig.Multiplier(profile.Supernovas)),
+	})
+	return { Success = true }
+end
+
+-- ===== Players =====
+local function onPlayerAdded(player)
+	player.CharacterAdded:Connect(function()
+		task.defer(StarData.Sync, player) -- sets Moon Boots speed on the new character
+	end)
+end
+Players.PlayerAdded:Connect(onPlayerAdded)
+for _, p in ipairs(Players:GetPlayers()) do
+	onPlayerAdded(p)
+end
+Players.PlayerRemoving:Connect(function(player)
+	lastRemote[player] = nil
+end)
+StarData.Loaded.Event:Connect(function(player)
+	notify:FireClient(player, { Kind = "Announce", Text = "Welcome to Starfall Scramble! Grab stars and bank them at the Star Well." })
+end)
+]]></string>
+      </Properties>
+    </Item>
+  </Item>
+  <Item class="StarterPlayer" referent="7">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="8">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="LocalScript" referent="9">
+        <Properties>
+          <string name="Name">StarHUD</string>
+          <string name="Source"><![CDATA[-- PLACE IN: StarterPlayer > StarterPlayerScripts
+-- TYPE: LocalScript
+-- NAME: StarHUD
+-- Everything on your screen in Starfall Scramble:
+--   * your bag meter (and a golden guide beam to the Star Well when it's full)
+--   * your Stardust, multiplier and Supernovas
+--   * the Upgrades shop and the Supernova window
+--   * the event banner and countdown
+--   * "+5" popups, big messages, sounds, and getting flung by meteors
+-- It also makes landed stars bob and the Prism stars shimmer (just on your screen).
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
+
+local StarConfig = require(ReplicatedStorage:WaitForChild("StarConfig"))
+local remotes = ReplicatedStorage:WaitForChild("StarfallRemotes")
+local buyRemote = remotes:WaitForChild("BuyUpgrade")
+local supernovaRemote = remotes:WaitForChild("Supernova")
+local notify = remotes:WaitForChild("Notify")
+local knockback = remotes:WaitForChild("Knockback")
+local player = Players.LocalPlayer
+
+local NAVY = Color3.fromRGB(22, 20, 44)
+local NAVY_LIGHT = Color3.fromRGB(36, 32, 68)
+local GOLD = Color3.fromRGB(255, 205, 80)
+local PINK = Color3.fromRGB(255, 110, 200)
+local CYAN = Color3.fromRGB(130, 225, 255)
+local RED = Color3.fromRGB(255, 80, 80)
+local WHITE = Color3.new(1, 1, 1)
+local SOFT = Color3.fromRGB(195, 190, 230)
+local GREEN = Color3.fromRGB(90, 210, 120)
+local DIM = Color3.fromRGB(80, 76, 110)
+
+local commas = StarConfig.Commas
+
+-- ===== Little UI helpers =====
+local function corner(parent, radius)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, radius)
+	c.Parent = parent
+	return c
+end
+
+local function stroke(parent, color, thickness)
+	local s = Instance.new("UIStroke")
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Color = color
+	s.Thickness = thickness or 2
+	s.Parent = parent
+	return s
+end
+
+local function label(parent, text, pos, size, textSize, color, font, align)
+	local l = Instance.new("TextLabel")
+	l.BackgroundTransparency = 1
+	l.Position = pos
+	l.Size = size
+	l.Text = text
+	l.TextColor3 = color or WHITE
+	l.Font = font or Enum.Font.GothamBold
+	l.TextSize = textSize
+	l.TextXAlignment = align or Enum.TextXAlignment.Left
+	l.TextTruncate = Enum.TextTruncate.AtEnd
+	l.Parent = parent
+	return l
+end
+
+local function button(parent, text, pos, size, color, textColor)
+	local b = Instance.new("TextButton")
+	b.Position = pos
+	b.Size = size
+	b.BackgroundColor3 = color
+	b.Text = text
+	b.TextColor3 = textColor or NAVY
+	b.Font = Enum.Font.FredokaOne
+	b.TextSize = 20
+	b.AutoButtonColor = true
+	b.Parent = parent
+	corner(b, 12)
+	return b
+end
+
+local function panel(parent, pos, size, anchor)
+	local f = Instance.new("Frame")
+	f.AnchorPoint = anchor or Vector2.zero
+	f.Position = pos
+	f.Size = size
+	f.BackgroundColor3 = NAVY
+	f.BackgroundTransparency = 0.08
+	f.Parent = parent
+	corner(f, 14)
+	return f
+end
+
+-- ===== Sounds =====
+local sounds = Instance.new("Folder")
+sounds.Name = "StarSounds"
+local function makeSound(name, id, volume)
+	local s = Instance.new("Sound")
+	s.Name = name
+	s.SoundId = id
+	s.Volume = volume
+	s.Parent = sounds
+	return s
+end
+local pingSound = makeSound("Ping", "rbxasset://sounds/electronicpingshort.wav", 0.45)
+local clickSound = makeSound("Click", "rbxasset://sounds/button.wav", 0.5)
+local swooshSound = makeSound("Swoosh", "rbxasset://sounds/swoosh.wav", 0.7)
+
+local function play(sound, pitch)
+	local s = sound:Clone()
+	s.PlaybackSpeed = pitch or 1
+	s.Parent = sounds
+	s:Play()
+	Debris:AddItem(s, 3)
+end
+
+-- ===== Screen =====
+local gui = Instance.new("ScreenGui")
+gui.Name = "StarHUD"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = player:WaitForChild("PlayerGui")
+sounds.Parent = gui
+
+-- everything lives in one full-screen frame that shrinks on small screens
+local root = Instance.new("Frame")
+root.BackgroundTransparency = 1
+root.AnchorPoint = Vector2.new(0.5, 0.5)
+root.Position = UDim2.fromScale(0.5, 0.5)
+root.Size = UDim2.fromScale(1, 1)
+root.Parent = gui
+local uiScale = Instance.new("UIScale")
+uiScale.Parent = root
+local function fit()
+	local camera = workspace.CurrentCamera
+	if not camera then return end
+	local vp = camera.ViewportSize
+	local s = math.clamp(math.min(vp.X / 1000, vp.Y / 640), 0.55, 1)
+	uiScale.Scale = s
+	root.Size = UDim2.fromScale(1 / s, 1 / s) -- keeps edges anchored to the real screen edges
+end
+fit()
+local cameraConn
+local function watchCamera()
+	if cameraConn then cameraConn:Disconnect() end
+	if workspace.CurrentCamera then
+		cameraConn = workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(fit)
+	end
+	fit()
+end
+watchCamera()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchCamera)
+
+-- ===== Wallet (top left) =====
+local wallet = panel(root, UDim2.fromOffset(14, 14), UDim2.fromOffset(250, 80))
+stroke(wallet, GOLD, 2).Transparency = 0.4
+local starIcon = label(wallet, "✦", UDim2.fromOffset(12, 8), UDim2.fromOffset(40, 44), 36, GOLD, Enum.Font.FredokaOne, Enum.TextXAlignment.Center)
+starIcon.TextTruncate = Enum.TextTruncate.None
+local dustLabel = label(wallet, "0", UDim2.fromOffset(58, 8), UDim2.new(1, -68, 0, 40), 32, WHITE, Enum.Font.FredokaOne)
+local walletSub = label(wallet, "", UDim2.fromOffset(16, 52), UDim2.new(1, -28, 0, 20), 14, SOFT, Enum.Font.GothamBold)
+
+-- ===== Bag meter (bottom centre) =====
+local bag = panel(root, UDim2.new(0.5, 0, 1, -22), UDim2.fromOffset(440, 60), Vector2.new(0.5, 1))
+local bagStroke = stroke(bag, GOLD, 2)
+local bagBack = Instance.new("Frame")
+bagBack.Position = UDim2.fromOffset(12, 12)
+bagBack.Size = UDim2.new(1, -24, 1, -24)
+bagBack.BackgroundColor3 = Color3.fromRGB(12, 10, 26)
+bagBack.Parent = bag
+corner(bagBack, 10)
+local bagFill = Instance.new("Frame")
+bagFill.Size = UDim2.fromScale(0, 1)
+bagFill.BackgroundColor3 = GOLD
+bagFill.BorderSizePixel = 0
+bagFill.Parent = bagBack
+corner(bagFill, 10)
+local fillGradient = Instance.new("UIGradient")
+fillGradient.Color = ColorSequence.new(Color3.fromRGB(255, 240, 170), Color3.fromRGB(255, 255, 255))
+fillGradient.Rotation = 90
+fillGradient.Parent = bagFill
+local bagText = label(bagBack, "", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 20, WHITE, Enum.Font.FredokaOne, Enum.TextXAlignment.Center)
+bagText.TextStrokeTransparency = 0.4
+
+-- ===== Side buttons (right) =====
+local upgradesButton = button(root, "UPGRADES", UDim2.new(1, -14, 0.5, -58), UDim2.fromOffset(170, 52), GOLD)
+upgradesButton.AnchorPoint = Vector2.new(1, 0.5)
+local novaButton = button(root, "SUPERNOVA", UDim2.new(1, -14, 0.5, 4), UDim2.fromOffset(170, 52), PINK)
+novaButton.AnchorPoint = Vector2.new(1, 0.5)
+local novaProgress = label(root, "", UDim2.new(1, -14, 0.5, 36), UDim2.fromOffset(170, 18), 13, SOFT, Enum.Font.GothamBold, Enum.TextXAlignment.Center)
+novaProgress.AnchorPoint = Vector2.new(1, 0)
+
+-- ===== Event banner (top centre) =====
+local banner = panel(root, UDim2.new(0.5, 0, 0, 14), UDim2.fromOffset(380, 58), Vector2.new(0.5, 0))
+local bannerStroke = stroke(banner, CYAN, 2)
+local bannerTitle = label(banner, "", UDim2.fromOffset(0, 6), UDim2.new(1, 0, 0, 26), 22, WHITE, Enum.Font.FredokaOne, Enum.TextXAlignment.Center)
+local bannerSub = label(banner, "", UDim2.fromOffset(10, 32), UDim2.new(1, -20, 0, 18), 13, SOFT, Enum.Font.GothamBold, Enum.TextXAlignment.Center)
+
+-- ===== Big message (upper middle) =====
+local toast = label(root, "", UDim2.new(0, 0, 0.24, 0), UDim2.new(1, 0, 0, 50), 38, WHITE, Enum.Font.FredokaOne, Enum.TextXAlignment.Center)
+toast.TextStrokeTransparency = 0.2
+toast.TextTruncate = Enum.TextTruncate.None
+toast.TextWrapped = true
+local toastScale = Instance.new("UIScale")
+toastScale.Parent = toast
+local toastSub = label(root, "", UDim2.new(0, 0, 0.24, 52), UDim2.new(1, 0, 0, 26), 20, SOFT, Enum.Font.GothamBold, Enum.TextXAlignment.Center)
+toastSub.TextStrokeTransparency = 0.4
+local toastToken = 0
+local function showToast(text, color, sub)
+	toastToken += 1
+	local mine = toastToken
+	toast.Text = text
+	toast.TextColor3 = color or WHITE
+	toast.TextTransparency = 0
+	toast.TextStrokeTransparency = 0.2
+	toastSub.Text = sub or ""
+	toastSub.TextTransparency = 0
+	toastSub.TextStrokeTransparency = 0.4
+	toastScale.Scale = 0.5
+	TweenService:Create(toastScale, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	task.delay(2.4, function()
+		if toastToken ~= mine then return end
+		local fade = TweenInfo.new(0.5)
+		TweenService:Create(toast, fade, { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+		TweenService:Create(toastSub, fade, { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+	end)
+end
+
+-- "+5" popping up from the bag meter
+local function popup(text, color, big)
+	local l = label(root, text, UDim2.new(0.5, math.random(-150, 150), 1, -96), UDim2.fromOffset(200, 30), big and 30 or 22, color,
+		Enum.Font.FredokaOne, Enum.TextXAlignment.Center)
+	l.AnchorPoint = Vector2.new(0.5, 1)
+	l.TextStrokeTransparency = 0.3
+	l.TextTruncate = Enum.TextTruncate.None
+	local info = TweenInfo.new(0.9, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(l, info, { Position = l.Position - UDim2.fromOffset(0, 70), TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+	Debris:AddItem(l, 1)
+end
+
+-- ===== Windows =====
+local function window(title, width, height, accent)
+	local w = panel(root, UDim2.fromScale(0.5, 0.5), UDim2.fromOffset(width, height), Vector2.new(0.5, 0.5))
+	w.BackgroundTransparency = 0
+	w.Visible = false
+	w.ZIndex = 5
+	stroke(w, accent, 3)
+	label(w, title, UDim2.fromOffset(22, 14), UDim2.new(1, -90, 0, 36), 30, accent, Enum.Font.FredokaOne)
+	local close = button(w, "X", UDim2.new(1, -54, 0, 14), UDim2.fromOffset(40, 40), Color3.fromRGB(200, 70, 80), WHITE)
+	close.Activated:Connect(function()
+		play(clickSound)
+		w.Visible = false
+	end)
+	return w
+end
+
+local shop = window("UPGRADES", 560, 446, GOLD)
+local shopError = label(shop, "", UDim2.new(0, 22, 1, -34), UDim2.new(1, -44, 0, 22), 15, RED, Enum.Font.GothamBold, Enum.TextXAlignment.Center)
+local shopRows = {}
+for i, def in ipairs(StarConfig.Upgrades) do
+	local row = Instance.new("Frame")
+	row.Position = UDim2.fromOffset(18, 62 + (i - 1) * 86)
+	row.Size = UDim2.new(1, -36, 0, 78)
+	row.BackgroundColor3 = NAVY_LIGHT
+	row.Parent = shop
+	corner(row, 12)
+	label(row, def.Name, UDim2.fromOffset(16, 8), UDim2.new(1, -200, 0, 26), 22, WHITE, Enum.Font.FredokaOne)
+	label(row, def.Description, UDim2.fromOffset(16, 34), UDim2.new(1, -200, 0, 18), 13, SOFT, Enum.Font.GothamMedium)
+	local level = label(row, "", UDim2.fromOffset(16, 54), UDim2.new(1, -200, 0, 18), 13, GOLD, Enum.Font.GothamBold)
+	local buy = button(row, "", UDim2.new(1, -170, 0.5, -24), UDim2.fromOffset(156, 48), GOLD)
+	buy.TextSize = 18
+	shopRows[def.Id] = { Level = level, Buy = buy, Def = def }
+	buy.Activated:Connect(function()
+		play(clickSound)
+		local ok, res = pcall(function()
+			return buyRemote:InvokeServer(def.Id)
+		end)
+		if not ok or type(res) ~= "table" then
+			shopError.Text = "Couldn't buy that. Try again."
+		elseif not res.Success then
+			shopError.Text = res.Error or "Couldn't buy that."
+		else
+			shopError.Text = ""
+			play(pingSound, 1.5)
+		end
+	end)
+end
+
+local novaWindow = window("GO SUPERNOVA", 480, 340, PINK)
+local novaInfo = label(novaWindow,
+	"Explode into a brand-new star! Your Stardust and upgrades reset to zero, but every bit of Stardust you bank from now on is multiplied. Forever.",
+	UDim2.fromOffset(22, 58), UDim2.new(1, -44, 0, 66), 15, SOFT, Enum.Font.GothamMedium)
+novaInfo.TextWrapped = true
+novaInfo.TextYAlignment = Enum.TextYAlignment.Top
+novaInfo.TextTruncate = Enum.TextTruncate.None
+local novaMult = label(novaWindow, "", UDim2.fromOffset(22, 130), UDim2.new(1, -44, 0, 40), 30, WHITE, Enum.Font.FredokaOne, Enum.TextXAlignment.Center)
+local novaBarBack = Instance.new("Frame")
+novaBarBack.Position = UDim2.fromOffset(22, 182)
+novaBarBack.Size = UDim2.new(1, -44, 0, 26)
+novaBarBack.BackgroundColor3 = Color3.fromRGB(12, 10, 26)
+novaBarBack.Parent = novaWindow
+corner(novaBarBack, 8)
+local novaBarFill = Instance.new("Frame")
+novaBarFill.Size = UDim2.fromScale(0, 1)
+novaBarFill.BackgroundColor3 = PINK
+novaBarFill.BorderSizePixel = 0
+novaBarFill.Parent = novaBarBack
+corner(novaBarFill, 8)
+local novaBarText = label(novaBarBack, "", UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), 15, WHITE, Enum.Font.GothamBold, Enum.TextXAlignment.Center)
+novaBarText.TextStrokeTransparency = 0.4
+local novaGo = button(novaWindow, "", UDim2.new(0.5, -140, 0, 224), UDim2.fromOffset(280, 56), PINK)
+local novaError = label(novaWindow, "", UDim2.new(0, 22, 1, -34), UDim2.new(1, -44, 0, 22), 15, RED, Enum.Font.GothamBold, Enum.TextXAlignment.Center)
+
+novaGo.Activated:Connect(function()
+	play(clickSound)
+	local ok, res = pcall(function()
+		return supernovaRemote:InvokeServer()
+	end)
+	if not ok or type(res) ~= "table" then
+		novaError.Text = "Couldn't go Supernova. Try again."
+	elseif not res.Success then
+		novaError.Text = res.Error or "Not yet!"
+	else
+		novaError.Text = ""
+		novaWindow.Visible = false
+		for i = 0, 4 do
+			task.delay(i * 0.08, play, pingSound, 0.8 + i * 0.2)
+		end
+	end
+end)
+
+upgradesButton.Activated:Connect(function()
+	play(clickSound)
+	novaWindow.Visible = false
+	shop.Visible = not shop.Visible
+	shopError.Text = ""
+end)
+novaButton.Activated:Connect(function()
+	play(clickSound)
+	shop.Visible = false
+	novaWindow.Visible = not novaWindow.Visible
+	novaError.Text = ""
+end)
+
+-- ===== Keeping it up to date =====
+local function attr(name)
+	return player:GetAttribute(name) or 0
+end
+
+local function refresh()
+	local dust = attr("Stardust")
+	local carried, capacity = attr("Carried"), math.max(1, attr("Capacity"))
+	local novas = attr("Supernovas")
+
+	dustLabel.Text = commas(dust)
+	walletSub.Text = string.format("x%g Stardust   |   %d Supernova%s", StarConfig.Multiplier(novas), novas, novas == 1 and "" or "s")
+
+	local full = carried >= capacity
+	TweenService:Create(bagFill, TweenInfo.new(0.12), { Size = UDim2.fromScale(math.clamp(carried / capacity, 0, 1), 1) }):Play()
+	bagFill.BackgroundColor3 = full and RED or GOLD
+	fillGradient.Enabled = not full
+	bagStroke.Color = full and RED or GOLD
+	bagText.Text = full and "BAG FULL! Bank at the Star Well" or string.format("★ %s / %s stars", commas(carried), commas(capacity))
+
+	for id, row in pairs(shopRows) do
+		local level = attr("Up_" .. id)
+		local def = row.Def
+		if level >= def.Max then
+			row.Level.Text = string.format("Lv %d / %d   %s", level, def.Max, StarConfig.Describe(id, level))
+			row.Buy.Text = "MAXED"
+			row.Buy.BackgroundColor3 = DIM
+			row.Buy.TextColor3 = SOFT
+		else
+			local cost = StarConfig.UpgradeCost(def, level)
+			row.Level.Text = string.format("Lv %d / %d   %s  →  %s", level, def.Max, StarConfig.Describe(id, level), StarConfig.Describe(id, level + 1))
+			row.Buy.Text = "✦ " .. commas(cost)
+			local afford = dust >= cost
+			row.Buy.BackgroundColor3 = afford and GREEN or DIM
+			row.Buy.TextColor3 = afford and NAVY or SOFT
+		end
+	end
+
+	local cost = StarConfig.SupernovaCost(novas)
+	local pct = math.clamp(dust / cost, 0, 1)
+	novaMult.Text = string.format("x%g  →  x%g Stardust", StarConfig.Multiplier(novas), StarConfig.Multiplier(novas + 1))
+	novaBarFill.Size = UDim2.fromScale(pct, 1)
+	novaBarText.Text = string.format("%s / %s Stardust", commas(dust), commas(cost))
+	novaGo.Text = pct >= 1 and "GO SUPERNOVA!" or ("Need ✦ " .. commas(cost))
+	novaGo.BackgroundColor3 = pct >= 1 and PINK or DIM
+	novaProgress.Text = pct >= 1 and "READY!" or string.format("%d%% to Supernova", math.floor(pct * 100))
+	novaProgress.TextColor3 = pct >= 1 and PINK or SOFT
+end
+refresh()
+for _, name in ipairs({ "Stardust", "Carried", "Capacity", "Supernovas", "Up_Bag", "Up_Speed", "Up_Magnet", "Up_Luck" }) do
+	player:GetAttributeChangedSignal(name):Connect(refresh)
+end
+
+-- ===== Guide beam to the well when your bag is full =====
+local guideBeam = Instance.new("Beam")
+guideBeam.Color = ColorSequence.new(GOLD)
+guideBeam.LightEmission = 1
+guideBeam.Transparency = NumberSequence.new(0.25, 0.6)
+guideBeam.Width0 = 0.6
+guideBeam.Width1 = 1.6
+guideBeam.FaceCamera = true
+guideBeam.Segments = 12
+guideBeam.Enabled = false
+local wellAttachment = nil
+task.spawn(function()
+	local island = workspace:WaitForChild("StarfallIsland", 60)
+	local well = island and island:WaitForChild("StarWell", 60)
+	wellAttachment = well and well:WaitForChild("GuideAttachment", 30)
+	guideBeam.Attachment1 = wellAttachment
+end)
+
+local function onCharacter(char)
+	local hrp = char:WaitForChild("HumanoidRootPart", 10)
+	if not hrp then return end
+	local from = Instance.new("Attachment")
+	from.Name = "GuideFrom"
+	from.Parent = hrp
+	guideBeam.Attachment0 = from
+	guideBeam.Parent = hrp
+end
+if player.Character then task.spawn(onCharacter, player.Character) end
+player.CharacterAdded:Connect(onCharacter)
+
+-- ===== Messages from the server =====
+local chain, lastCollect = 0, 0
+notify.OnClientEvent:Connect(function(msg)
+	if type(msg) ~= "table" then return end
+	if msg.Kind == "Collect" then
+		-- the ping climbs in pitch while you keep grabbing stars
+		local now = os.clock()
+		chain = now - lastCollect < 0.9 and chain + 1 or 0
+		lastCollect = now
+		play(pingSound, 1 + math.min(chain, 14) * 0.07)
+		local def = StarConfig.ByName[msg.Star]
+		local color = def and def.Color or GOLD
+		if msg.Lucky then
+			popup("LUCKY! +" .. commas(msg.Value), Color3.fromRGB(120, 255, 140), true)
+		else
+			popup("+" .. commas(msg.Value), color, (msg.Value or 0) >= 25)
+		end
+		if msg.Star == "Prism" then
+			showToast("PRISM STAR!", PINK, "+" .. commas(msg.Value) .. " stars")
+		end
+	elseif msg.Kind == "Deposit" then
+		for i = 0, 3 do
+			task.delay(i * 0.07, play, pingSound, 0.7 + i * 0.25)
+		end
+		showToast("+" .. commas(msg.Stardust or 0) .. " Stardust", GOLD, string.format("Banked %s stars", commas(msg.Stars or 0)))
+	elseif msg.Kind == "Hit" then
+		play(swooshSound, 0.8)
+		if (msg.Lost or 0) > 0 then
+			showToast("METEOR HIT!", RED, string.format("You spilled %s stars. Grab them back!", commas(msg.Lost)))
+		else
+			showToast("METEOR HIT!", RED)
+		end
+	elseif msg.Kind == "FellOff" then
+		play(swooshSound, 0.6)
+		showToast("YOU FELL OFF!", RED, (msg.Lost or 0) > 0 and ("Lost " .. commas(msg.Lost) .. " stars") or nil)
+	elseif msg.Kind == "Announce" and type(msg.Text) == "string" then
+		showToast(msg.Text, PINK)
+	end
+end)
+
+-- Getting flung by a meteor. You own your character's physics, so the server asks us to do it.
+knockback.OnClientEvent:Connect(function(velocity)
+	if typeof(velocity) ~= "Vector3" or velocity.Magnitude > 200 then return end
+	local char = player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+	if not hrp or not humanoid then return end
+	humanoid.PlatformStand = true
+	hrp.AssemblyLinearVelocity = velocity
+	hrp.AssemblyAngularVelocity = Vector3.new(math.random(-8, 8), math.random(-8, 8), math.random(-8, 8))
+	task.delay(0.9, function()
+		if humanoid.Parent then
+			humanoid.PlatformStand = false
+			humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		end
+	end)
+end)
+
+-- ===== Every frame: event banner, guide beam, star sparkle =====
+local starsFolder = workspace:WaitForChild("Stars")
+local clock = 0
+local lastBannerText = ""
+RunService.RenderStepped:Connect(function(dt)
+	clock += dt
+
+	-- event banner
+	local event = workspace:GetAttribute("StarEvent") or ""
+	local now = workspace:GetServerTimeNow()
+	local title, sub
+	if event ~= "" then
+		local def = StarConfig.Events[event]
+		local left = math.max(0, math.ceil((workspace:GetAttribute("StarEventEnds") or now) - now))
+		title = string.format("%s!  %d:%02d", string.upper(event), left // 60, left % 60)
+		sub = def and def.Description or ""
+		bannerStroke.Color = def and def.Color or CYAN
+		bannerTitle.TextColor3 = def and def.Color or WHITE
+	else
+		local left = math.max(0, math.ceil((workspace:GetAttribute("NextStarEvent") or now) - now))
+		title = string.format("Next event in %d:%02d", left // 60, left % 60)
+		sub = "Meteor Shower and Prism Rain take turns"
+		bannerStroke.Color = CYAN
+		bannerTitle.TextColor3 = WHITE
+	end
+	if title ~= lastBannerText then
+		if event ~= "" and not string.find(lastBannerText, "!", 1, true) then
+			showToast(string.upper(event) .. "!", StarConfig.Events[event] and StarConfig.Events[event].Color or WHITE, StarConfig.Events[event] and StarConfig.Events[event].Description)
+		end
+		lastBannerText = title
+		bannerTitle.Text = title
+		bannerSub.Text = sub
+	end
+
+	-- the guide beam only shows while your bag is full
+	local full = attr("Carried") >= math.max(1, attr("Capacity"))
+	guideBeam.Enabled = full and wellAttachment ~= nil
+	if full then
+		bag.Size = UDim2.fromOffset(440 + math.sin(clock * 8) * 6, 60)
+	elseif bag.Size.X.Offset ~= 440 then
+		bag.Size = UDim2.fromOffset(440, 60)
+	end
+
+	-- landed stars bob and spin; Prism stars cycle through the rainbow
+	for _, star in ipairs(starsFolder:GetChildren()) do
+		if star:IsA("BasePart") and star:GetAttribute("Landed") and not star:GetAttribute("Collecting") then
+			local baseY = star:GetAttribute("BaseY")
+			if baseY then
+				local phase = (star.Position.X + star.Position.Z) * 0.1
+				local pos = Vector3.new(star.Position.X, baseY + math.sin(clock * 3 + phase) * 0.4, star.Position.Z)
+				star.CFrame = CFrame.new(pos) * CFrame.Angles(0, clock * 2 + phase, 0)
+			end
+			if star:GetAttribute("Rainbow") then
+				star.Color = Color3.fromHSV((clock * 0.35) % 1, 0.55, 1)
+			end
+		end
+	end
+end)
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+</roblox>
