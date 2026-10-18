@@ -1,7 +1,7 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: PlacementUI
--- (replaces the earlier version: range previews include unit levels and evolution stars)
+-- (replaces the earlier version: in Infinite Mode the HUD shows your best wave)
 -- HUD (wave, base HP, cash), unit hotbar, click-to-place with a range preview.
 -- Controls: click a unit in the hotbar, then click a green plot to place it.
 -- Click a placed unit (with nothing selected) to upgrade or sell it.
@@ -91,17 +91,20 @@ local function showToast(text)
 end
 
 local function refreshHud()
+	-- MaxWave is 0 in Infinite Mode: show your best wave instead
+	local maxWave = player:GetAttribute("MaxWave") or 0
+	local waveText = maxWave > 0 and string.format("Wave %d/%d", player:GetAttribute("Wave") or 0, maxWave)
+		or string.format("Wave %d (Best %d)", player:GetAttribute("Wave") or 0, player:GetAttribute("BestWave") or 0)
 	hud.Text = string.format(
-		"%s   |   Base HP: %d   |   Wave %d/%d   |   Cash: $%d",
+		"%s   |   Base HP: %d   |   %s   |   Cash: $%d",
 		player:GetAttribute("MatchStatus") or "",
 		player:GetAttribute("BaseHealth") or 0,
-		player:GetAttribute("Wave") or 0,
-		player:GetAttribute("MaxWave") or 0,
+		waveText,
 		player:GetAttribute("Cash") or 0
 	)
 end
 refreshHud()
-for _, name in ipairs({ "MatchStatus", "BaseHealth", "Wave", "MaxWave" }) do
+for _, name in ipairs({ "MatchStatus", "BaseHealth", "Wave", "MaxWave", "BestWave" }) do
 	player:GetAttributeChangedSignal(name):Connect(refreshHud)
 end
 player:GetAttributeChangedSignal("Cash"):Connect(refreshHud)

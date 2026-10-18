@@ -6,6 +6,7 @@
 --     before them beaten first. Picking a level starts the countdown, START skips most of it.
 --   * Everyone else on the pad sees which level the host picked and the countdown.
 -- Step off the pad (or press X) to close it.
+-- (replaces the earlier version: room for the Infinite Mode level, which shows your best wave)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,7 +14,8 @@ local LevelData = require(ReplicatedStorage:WaitForChild("LevelData"))
 local levelRemote = ReplicatedStorage:WaitForChild("LevelSelectRemote")
 local player = Players.LocalPlayer
 
-local WIDTH, HEIGHT = 560, 500
+local CARD_HEIGHT, CARD_GAP = 80, 8
+local WIDTH, HEIGHT = 560, 180 + #LevelData.Levels * (CARD_HEIGHT + CARD_GAP)
 local WHITE = Color3.new(1, 1, 1)
 local PANEL = Color3.fromRGB(22, 20, 38)
 local CARD = Color3.fromRGB(34, 31, 56)
@@ -90,11 +92,11 @@ corner(close, 8)
 
 local list = Instance.new("Frame")
 list.Position = UDim2.fromOffset(16, 72)
-list.Size = UDim2.new(1, -32, 0, 4 * 80 + 3 * 8)
+list.Size = UDim2.new(1, -32, 0, #LevelData.Levels * (CARD_HEIGHT + CARD_GAP) - CARD_GAP)
 list.BackgroundTransparency = 1
 list.Parent = window
 local listLayout = Instance.new("UIListLayout")
-listLayout.Padding = UDim.new(0, 8)
+listLayout.Padding = UDim.new(0, CARD_GAP)
 listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 listLayout.Parent = list
 
@@ -144,7 +146,7 @@ end
 for i, level in ipairs(LevelData.Levels) do
 	local card = Instance.new("TextButton")
 	card.LayoutOrder = i
-	card.Size = UDim2.new(1, 0, 0, 80)
+	card.Size = UDim2.new(1, 0, 0, CARD_HEIGHT)
 	card.BackgroundColor3 = CARD
 	card.AutoButtonColor = false
 	card.Text = ""
@@ -167,12 +169,16 @@ for i, level in ipairs(LevelData.Levels) do
 
 	label(card, level.Name, UDim2.fromOffset(22, 8), UDim2.new(1, -170, 0, 24), 19, WHITE, Enum.Font.GothamBlack)
 	label(card, level.Difficulty:upper(), UDim2.fromOffset(22, 32), UDim2.fromOffset(110, 16), 12, level.Color, Enum.Font.GothamBlack)
-	label(card, string.format("%d waves   -   enemies x%.1f HP", level.Waves, level.HealthMult),
-		UDim2.fromOffset(120, 32), UDim2.new(1, -290, 0, 16), 12, SUBTLE)
+	local info = level.Infinite
+		and string.format("Endless waves   -   enemies +%d%% HP a wave", math.floor((level.Growth - 1) * 100 + 0.5))
+		or string.format("%d waves   -   enemies x%.1f HP", level.Waves, level.HealthMult)
+	label(card, info, UDim2.fromOffset(120, 32), UDim2.new(1, -290, 0, 16), 12, SUBTLE)
 	label(card, level.Description, UDim2.fromOffset(22, 52), UDim2.new(1, -170, 0, 18), 12, SUBTLE, Enum.Font.Gotham)
 
-	label(card, "+" .. level.WinGold .. " Gold", UDim2.new(1, -140, 0, 12), UDim2.fromOffset(126, 20), 15, GOLD, Enum.Font.GothamBlack, Enum.TextXAlignment.Right)
-	label(card, "+" .. level.WinGems .. " Gems", UDim2.new(1, -140, 0, 32), UDim2.fromOffset(126, 20), 15, GEM, Enum.Font.GothamBlack, Enum.TextXAlignment.Right)
+	local goldText = level.Infinite and ("+" .. level.GoldPerWave .. " Gold/wave") or ("+" .. level.WinGold .. " Gold")
+	local gemsText = level.Infinite and ("Bonus every " .. level.MilestoneEvery) or ("+" .. level.WinGems .. " Gems")
+	label(card, goldText, UDim2.new(1, -150, 0, 12), UDim2.fromOffset(136, 20), 15, GOLD, Enum.Font.GothamBlack, Enum.TextXAlignment.Right)
+	label(card, gemsText, UDim2.new(1, -150, 0, 32), UDim2.fromOffset(136, 20), 15, GEM, Enum.Font.GothamBlack, Enum.TextXAlignment.Right)
 	local tag = label(card, "", UDim2.new(1, -170, 0, 54), UDim2.fromOffset(156, 18), 12, SUBTLE, Enum.Font.GothamBlack, Enum.TextXAlignment.Right)
 
 	cards[level.Id] = { Frame = card, Stroke = stroke, Tag = tag, Level = level }
@@ -235,6 +241,10 @@ local function refresh()
 		elseif not unlocked then
 			c.Tag.Text = "LOCKED - beat " .. LevelData.Get(c.Level.Requires).Name
 			c.Tag.TextColor3 = LOCKED
+		elseif c.Level.Infinite then
+			local best = player:GetAttribute("BestWave") or 0
+			c.Tag.Text = best > 0 and ("BEST: WAVE " .. best) or "NO RUNS YET"
+			c.Tag.TextColor3 = c.Level.Color
 		elseif cleared[id] then
 			c.Tag.Text = "CLEARED"
 			c.Tag.TextColor3 = Color3.fromRGB(110, 230, 140)
@@ -267,6 +277,7 @@ local function watchPad(pad)
 	end
 end
 player:GetAttributeChangedSignal("ClearedLevels"):Connect(refresh)
+player:GetAttributeChangedSignal("BestWave"):Connect(refresh)
 
 -- Which pad are you standing on? (the same check the server uses to queue you)
 local function padUnderPlayer()

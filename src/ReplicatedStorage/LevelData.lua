@@ -1,6 +1,7 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: LevelData
+-- (replaces the earlier version: adds Infinite Mode, the Endless Abyss)
 -- The playable levels you pick from on a team pad. Each one is harder than the last and
 -- pays more for a win. Beating a level unlocks the next one (saved per player).
 --
@@ -12,6 +13,13 @@
 --   WinGold     gold for every player on a win
 --   WinGems     gems for every player on a win
 --   Requires    the level you must have beaten to play this one (nil = always open)
+--
+-- Infinite levels (Infinite = true) never end: you play until your base falls, and your
+-- best wave is saved and ranked on the lobby leaderboard. Instead of win rewards they pay:
+--   Growth          enemy health is multiplied by this again every wave (1.06 = +6% a wave)
+--   GoldPerWave     gold for every wave cleared, paid when the run ends
+--   MilestoneEvery  every Nth wave cleared pays a bonus straight away...
+--   MilestoneGems   ...of this many gems times the milestone number (wave 10: x1, wave 20: x2)
 
 local LevelData = {}
 
@@ -39,6 +47,12 @@ LevelData.Levels = {
 		Description = "The Demon King's own gate. Only the strongest teams survive.",
 		Waves = 25, HealthMult = 4, SpeedMult = 1.3, BossEvery = 5, StartCash = 800,
 		WinGold = 1500, WinGems = 300, Requires = 3,
+	},
+	{
+		Id = 5, Name = "Endless Abyss", Difficulty = "Infinite", Color = Color3.fromRGB(190, 90, 255),
+		Description = "The waves never stop. How far can your team get?",
+		Infinite = true, Waves = 0, HealthMult = 1.2, SpeedMult = 1.1, BossEvery = 5, StartCash = 600,
+		Growth = 1.06, GoldPerWave = 40, MilestoneEvery = 10, MilestoneGems = 150, Requires = 1,
 	},
 }
 

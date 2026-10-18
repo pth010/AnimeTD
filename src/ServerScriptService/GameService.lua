@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GameService
--- (replaces the earlier version: a problem paying out win rewards can no longer skip the
---  victory screen, and match results are printed in the Output)
+-- (replaces the earlier version: adds Infinite Mode - endless waves, milestone rewards,
+--  your best wave saved and ranked on the lobby leaderboard)
 -- Runs the lobby queues and every match: waves, enemies, unit placement, combat, upgrades.
 
 local Players = game:GetService("Players")
@@ -19,6 +19,7 @@ local LevelData = require(ReplicatedStorage:WaitForChild("LevelData"))
 local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
 local ProgressData = require(ReplicatedStorage:WaitForChild("ProgressData"))
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
+local Leaderboard = require(ServerScriptService:WaitForChild("Leaderboard"))
 
 local arenasFolder = workspace:WaitForChild("Arenas")
 local lobbyFolder = workspace:WaitForChild("Lobby")
@@ -45,6 +46,12 @@ local UPGRADE_COST_MULT = 0.75 -- upgrade cost = unit cost * this * current leve
 local SELL_REFUND = 0.6        -- fraction of total cash invested that you get back
 local ENEMY_SPEED_MULT = 2     -- the map is long, so enemies move faster
 local PATH_CLEARANCE = 4.5     -- how close to the path's center line a unit may be placed
+
+-- Infinite Mode: past these waves enemies stop getting more numerous / faster and only get
+-- tougher (LevelData's Growth), so late waves stay quick but deadly
+local INFINITE_COUNT_CAP = 25
+local INFINITE_SPEED_CAP = 40
+local INFINITE_EXTRA_BOSS_EVERY = 20 -- boss waves bring one more boss every this many waves
 
 -- Match speed. 1x and 1.5x are free; 2x needs the 2x Speed game pass. Make the pass in the
 -- Creator Dashboard (your experience > Monetization > Passes) and paste its ID here.
@@ -256,7 +263,14 @@ end
 
 -- ===== ENEMIES =====
 -- Which enemies appear in a wave, in a shuffled spawn order
-local function buildWave(wave, bossEvery)
+local function buildWave(wave, level)
+	local bossWave = wave % level.BossEvery == 0
+	local bosses = 1
+	if level.Infinite then
+		bosses += math.floor(wave / INFINITE_EXTRA_BOSS_EVERY)
+		wave = math.min(wave, INFINITE_COUNT_CAP)
+	end
+
 	local list = {}
 	for _ = 1, 4 + wave * 2 do table.insert(list, "Normal") end
 	if wave >= 3 then
@@ -271,8 +285,10 @@ local function buildWave(wave, bossEvery)
 		list[i], list[j] = list[j], list[i]
 	end
 
-	if wave % bossEvery == 0 then
-		table.insert(list, "Boss") -- the boss always comes last
+	if bossWave then
+		for _ = 1, bosses do
+			table.insert(list, "Boss") -- bosses always come last
+		end
 	end
 	return list
 end
@@ -287,7 +303,9 @@ end
 local function spawnEnemy(arena, wave, typeName)
 	local def = ENEMY_TYPES[typeName]
 	local level = arena.Level
-	local maxHp = math.floor((50 + wave * 25) * def.HealthMult * level.HealthMult)
+	local growth = level.Growth and level.Growth ^ (wave - 1) or 1 -- Infinite Mode's ramp
+	local maxHp = math.floor((50 + wave * 25) * def.HealthMult * level.HealthMult * growth)
+	local speedWave = level.Infinite and math.min(wave, INFINITE_SPEED_CAP) or wave
 	local offset = Vector3.new(0, def.Size.Y / 2, 0)
 	local start = arena.Waypoints[1].Position + offset
 	local face = facing(arena.Waypoints[2].Position - arena.Waypoints[1].Position) or CFrame.new()
@@ -318,7 +336,7 @@ local function spawnEnemy(arena, wave, typeName)
 		Phase = math.random() * math.pi * 2,
 		Offset = offset,
 		Health = maxHp,
-		Speed = (6 + wave * 0.25) * def.SpeedMult * level.SpeedMult * ENEMY_SPEED_MULT,
+		Speed = (6 + speedWave * 0.25) * def.SpeedMult * level.SpeedMult * ENEMY_SPEED_MULT,
 		Index = 2, -- the waypoint it is currently heading toward
 		Reward = math.floor((15 + wave * 2) * def.RewardMult),
 		BaseDamage = def.BaseDamage,
@@ -330,7 +348,7 @@ end
 local function statsFor(arena, player)
 	local s = arena.Stats[player.UserId]
 	if not s then
-		s = { Name = player.DisplayName, UserId = player.UserId, Damage = 0, Kills = 0, Gems = 0 }
+		s = { Name = player.DisplayName, UserId = player.UserId, Damage = 0, Kills = 0, Gems = 0, Gold = 0 }
 		arena.Stats[player.UserId] = s
 	end
 	return s
@@ -866,6 +884,41 @@ local function endMatch(arena)
 	arena.Attrs.MatchStatus = "In lobby"
 end
 
+-- Infinite Mode: gold piles up every wave (paid when the run ends) and every
+-- MilestoneEvery-th wave pays a gem bonus on the spot, bigger each time
+local function payInfiniteWave(arena, wave)
+	local level = arena.Level
+	local milestone = wave % level.MilestoneEvery == 0
+	local gems = milestone and level.MilestoneGems * (wave / level.MilestoneEvery) or 0
+	for p in pairs(arena.Players) do
+		local stats = statsFor(arena, p)
+		stats.Gold += level.GoldPerWave
+		if milestone then
+			PlayerData.AddGems(p, gems)
+			stats.Gems += gems
+			rewardEvent:FireClient(p, { Title = "WAVE " .. wave .. "!", Gems = gems })
+		end
+	end
+end
+
+-- The base fell in Infinite Mode: pay the gold, save best waves, update the leaderboard
+local function finishInfiniteRun(arena, cleared)
+	for p in pairs(arena.Players) do
+		local stats = statsFor(arena, p)
+		local ok, err = pcall(function()
+			if stats.Gold > 0 then
+				PlayerData.AddGold(p, stats.Gold)
+			end
+			stats.NewBest = PlayerData.RecordWave(p, cleared)
+			stats.Best = PlayerData.Get(p) and PlayerData.Get(p).BestWave or cleared
+			Leaderboard.Submit(p, cleared)
+		end)
+		if not ok then
+			warn("[GameService] couldn't pay the Infinite run to " .. p.Name .. ":", err)
+		end
+	end
+end
+
 -- Plays one match of arena.Level from wave 1.
 -- Returns true (won), false (base destroyed) or nil (everyone left).
 local function playMatch(arena, participants)
@@ -887,7 +940,10 @@ local function playMatch(arena, participants)
 		teleportTo(p, arena.Spawn, 6)
 	end
 
-	for wave = 1, level.Waves do
+	-- Infinite levels keep going until the base falls
+	local wave = 0
+	while level.Infinite or wave < level.Waves do
+		wave += 1
 		local isBoss = wave % level.BossEvery == 0
 
 		arena.State = "Intermission"
@@ -901,7 +957,7 @@ local function playMatch(arena, participants)
 		setMatchAttr(arena, "MatchStatus", isBoss and ("Wave " .. wave .. " - BOSS!") or ("Wave " .. wave))
 		arena.State = "Playing"
 
-		for _, typeName in ipairs(buildWave(wave, level.BossEvery)) do
+		for _, typeName in ipairs(buildWave(wave, level)) do
 			if arena.State ~= "Playing" or not participantsLeft(arena) then break end
 			spawnEnemy(arena, wave, typeName)
 			task.wait(SPAWN_INTERVAL / speedOf(arena))
@@ -911,12 +967,20 @@ local function playMatch(arena, participants)
 		end
 
 		if not participantsLeft(arena) then return nil end
-		if arena.State ~= "Playing" then return false end -- base destroyed
+		if arena.State ~= "Playing" then
+			if level.Infinite then
+				finishInfiniteRun(arena, wave - 1)
+			end
+			return false -- base destroyed
+		end
 
 		payFarms(arena)
 		for p in pairs(arena.Players) do
 			PlayerData.AddGems(p, WAVE_GEMS)
 			statsFor(arena, p).Gems += WAVE_GEMS
+		end
+		if level.Infinite then
+			payInfiniteWave(arena, wave)
 		end
 	end
 
@@ -941,7 +1005,8 @@ end
 local function showResults(arena, victory)
 	arena.State = "Results"
 	table.clear(arena.Votes)
-	setMatchAttr(arena, "MatchStatus", victory and "Victory!" or "Defeat!")
+	local level = arena.Level
+	setMatchAttr(arena, "MatchStatus", level.Infinite and "Game over!" or (victory and "Victory!" or "Defeat!"))
 	setMatchAttr(arena, "ResultsReady", 0)
 
 	local rows = {}
@@ -955,17 +1020,21 @@ local function showResults(arena, victory)
 	local teamCount = 0
 	for _ in pairs(arena.Players) do teamCount += 1 end
 	print(string.format("[GameService] arena %d: %s on %s, showing results to %d player(s)",
-		arena.Id, victory and "VICTORY" or "defeat", arena.Level.Name, teamCount))
+		arena.Id, level.Infinite and ("reached wave " .. arena.Attrs.Wave) or (victory and "VICTORY" or "defeat"),
+		level.Name, teamCount))
 
 	for p in pairs(arena.Players) do
 		local mine = statsFor(arena, p)
 		resultsEvent:FireClient(p, {
 			Victory = victory,
 			Wave = arena.Attrs.Wave,
-			MaxWave = arena.Level.Waves,
-			LevelName = arena.Level.Name,
-			Gold = victory and arena.Level.WinGold or 0,
+			MaxWave = level.Waves,
+			LevelName = level.Name,
+			Gold = level.Infinite and mine.Gold or (victory and level.WinGold or 0),
 			Gems = mine.Gems,
+			Infinite = level.Infinite == true,
+			BestWave = mine.Best or 0,
+			NewBest = mine.NewBest == true,
 			TotalDamage = math.floor(totalDamage),
 			Players = rows,
 			TeamCount = teamCount,

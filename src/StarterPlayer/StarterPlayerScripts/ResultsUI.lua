@@ -6,8 +6,8 @@
 --   PLAY AGAIN       - the team replays once everyone left on the screen has picked it
 --   RETURN TO LOBBY  - go back to the lobby straight away
 -- After 30 seconds, players who picked Play Again replay and everyone else returns to the lobby.
--- (replaces the earlier version: no longer breaks if the camera isn't ready when it starts,
---  and prints "[ResultsUI]" lines in the Output so problems are easy to spot)
+-- In Infinite Mode it shows the wave you reached and your best, with a NEW BEST! banner.
+-- (replaces the earlier version: adds the Infinite Mode game-over screen)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -25,6 +25,7 @@ local GOLD = Color3.fromRGB(255, 205, 70)
 local GEM = Color3.fromRGB(130, 220, 255)
 local WIN_COLOR = Color3.fromRGB(255, 205, 70)
 local LOSE_COLOR = Color3.fromRGB(235, 80, 80)
+local INFINITE_COLOR = Color3.fromRGB(190, 90, 255)
 
 -- 1234567 -> "1,234,567"
 local function commas(n)
@@ -229,11 +230,18 @@ local function show(data)
 	teamCount = data.TeamCount or 1
 	deadline = os.clock() + (data.Time or 30)
 
+	local cleared = data.Victory and data.MaxWave or math.max(0, (data.Wave or 1) - 1)
 	local color = data.Victory and WIN_COLOR or LOSE_COLOR
-	title.Text = data.Victory and "VICTORY!" or "DEFEAT"
+	if data.Infinite then
+		color = data.NewBest and WIN_COLOR or INFINITE_COLOR
+		title.Text = data.NewBest and "NEW BEST!" or "GAME OVER"
+		subtitle.Text = string.format("You cleared %d waves   -   Your best: %d", cleared, math.max(data.BestWave or 0, cleared))
+	else
+		title.Text = data.Victory and "VICTORY!" or "DEFEAT"
+		subtitle.Text = string.format("Waves cleared: %d / %d", cleared, data.MaxWave or 0)
+	end
 	title.TextColor3 = color
 	panelStroke.Color = color
-	subtitle.Text = string.format("Waves cleared: %d / %d", data.Victory and data.MaxWave or math.max(0, (data.Wave or 1) - 1), data.MaxWave or 0)
 
 	goldText.Text = (data.Gold or 0) > 0 and ("+" .. commas(data.Gold) .. " Gold") or "+0 Gold"
 	gemsText.Text = "+" .. commas(data.Gems or 0) .. " Gems"
@@ -263,7 +271,7 @@ resultsEvent.OnClientEvent:Connect(function(data)
 	if data.Hide then
 		hide()
 	else
-		print("[ResultsUI] showing the", data.Victory and "victory" or "defeat", "screen")
+		print("[ResultsUI] showing the", data.Infinite and "game over" or (data.Victory and "victory" or "defeat"), "screen")
 		fitToScreen()
 		local ok, err = pcall(show, data)
 		if not ok then

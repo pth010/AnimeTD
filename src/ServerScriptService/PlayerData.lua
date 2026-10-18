@@ -1,7 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: ModuleScript
 -- NAME: PlayerData
--- (replaces the earlier version: adds unit levels from fusing, and evolution stars)
+-- (replaces the earlier version: saves your best wave in Infinite Mode)
 --
 -- Single source of truth for each player's gems, gold, pity, units, locks, team and settings.
 -- Saving needs a published place (File > Publish to Roblox). To test in Studio, also enable
@@ -52,6 +52,7 @@ PlayerData.Profiles = {}
 --   Traits     [name] = trait name (see TraitData), one per unit you own
 --   XP         [name] = fusion XP (sets the unit's level, see ProgressData)
 --   Stars      [name] = evolution stars (0 to ProgressData.MaxStars)
+--   BestWave   = the highest wave reached in Infinite Mode (only ever goes up)
 -- Units = Obtained - Deleted. Keeping both running totals lets two servers merge
 -- their saves safely: taking the higher of each total can never resurrect a deleted
 -- unit or lose a new one.
@@ -128,6 +129,7 @@ function PlayerData.Sync(player)
 	player:SetAttribute("Gems", profile.Gems)
 	player:SetAttribute("Gold", profile.Gold)
 	player:SetAttribute("Pity", profile.Pity)
+	player:SetAttribute("BestWave", profile.BestWave)
 
 	local counts, locks = {}, {}
 	for name, count in pairs(profile.Units) do
@@ -214,6 +216,7 @@ function PlayerData.Load(player)
 		Traits = {},
 		XP = {},
 		Stars = {},
+		BestWave = 0,
 		Busy = false,
 		SavePending = false,
 		CanSave = ok, -- never save over a profile we failed to load
@@ -223,6 +226,7 @@ function PlayerData.Load(player)
 		profile.Gems = tonumber(saved.Gems) or STARTING_GEMS
 		profile.Gold = tonumber(saved.Gold) or STARTING_GOLD
 		profile.Pity = tonumber(saved.Pity) or 0
+		profile.BestWave = math.max(0, math.floor(tonumber(saved.BestWave) or 0))
 
 		if type(saved.Units) == "table" then
 			profile.Units = cleanCounts(saved.Units) -- may be empty, that's valid
@@ -354,6 +358,12 @@ function PlayerData.Save(player)
 			end
 			table.sort(clearedList)
 
+			-- best wave: whichever server saw the higher one
+			local bestWave = profile.BestWave
+			if type(old) == "table" and tonumber(old.BestWave) then
+				bestWave = math.max(bestWave, math.floor(tonumber(old.BestWave)))
+			end
+
 			return {
 				Gems = profile.Gems,
 				Gold = profile.Gold,
@@ -369,6 +379,7 @@ function PlayerData.Save(player)
 				Traits = traits,
 				XP = xpOut,
 				Stars = starsOut,
+				BestWave = bestWave,
 			}
 		end)
 	end)
@@ -421,6 +432,16 @@ function PlayerData.MarkCleared(player, levelId)
 	profile.Cleared[levelId] = true
 	PlayerData.Sync(player)
 	PlayerData.RequestSave(player)
+end
+
+-- Records how far the player got in an Infinite Mode run. Returns true if it's a new best.
+function PlayerData.RecordWave(player, wave)
+	local profile = PlayerData.Profiles[player]
+	if not profile or wave <= profile.BestWave then return false end
+	profile.BestWave = wave
+	PlayerData.Sync(player)
+	PlayerData.RequestSave(player)
+	return true
 end
 
 function PlayerData.HasCleared(player, levelId)
