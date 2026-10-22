@@ -1,8 +1,8 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: UnitModels
--- (replaces the earlier version: attack timing lives here now, so GameService can land the
---  damage when the attack's animation reaches the enemy; see UnitModels.ImpactTime)
+-- (replaces the earlier version: every unit has the rounded Roblox head (no neck) on the
+--  blocky body, with its face, hair, hats and helmets refitted round it)
 -- Builds the character model for each unit out of parts (no uploaded assets needed).
 -- Every unit has a "look" below. Change them freely.
 --
@@ -188,6 +188,13 @@ local function disc(model, name, diameter, thickness, pos, color, material)
 	return p
 end
 
+-- A cylinder standing upright, `height` tall
+local function upright(model, name, diameter, height, pos, color, material)
+	local p = add(model, name, Vector3.new(height, diameter, diameter), CFrame.new(pos) * CFrame.Angles(0, 0, R(90)), color, material)
+	p.Shape = Enum.PartType.Cylinder
+	return p
+end
+
 local function glowLight(part, color, range)
 	local light = Instance.new("PointLight")
 	light.Color = color
@@ -196,15 +203,24 @@ local function glowLight(part, color, range)
 	light.Parent = part
 end
 
--- ===== The body: a classic blocky avatar =====
--- legs 0-2, torso 2-4, arms beside it (shoulders at 4), the head a 1.25 block from 4 to 5.25
-local HEAD_Y = 4.625
-local HEAD = 1.25
-local FRONT = -HEAD / 2 - 0.015 -- just in front of the face
+-- ===== The body: a classic blocky avatar with the rounded Roblox head =====
+-- legs 0-2, torso 2-4, arms beside it (shoulders at 4). The head sits straight on the
+-- shoulders (no neck): round, with straight sides from the shoulders up to HEAD_TOP and a
+-- rounded top. Face features are placed from HEAD_Y.
+local HEAD_Y = 4.52
+local HEAD_R = 0.58   -- the head's radius
+local HEAD_TOP = 4.62 -- where the straight sides end and the rounded top begins
 
 -- A point relative to the middle of the head
 local function H(x, y, z)
 	return CFrame.new(x, HEAD_Y + y, z)
+end
+
+-- How far out the head's surface is at height y (from HEAD_Y)
+local function headRadius(y)
+	local above = HEAD_Y + y - HEAD_TOP
+	if above <= 0 then return HEAD_R end
+	return math.sqrt(math.max(HEAD_R ^ 2 - above ^ 2, 0.01))
 end
 
 local function buildBody(m, look)
@@ -222,7 +238,9 @@ local function buildBody(m, look)
 		end
 	end
 	add(m, "Torso", Vector3.new(2, 2, 1), CFrame.new(0, 3, 0), shirt)
-	add(m, "Head", Vector3.new(HEAD, HEAD, HEAD), CFrame.new(0, HEAD_Y, 0), skin)
+	upright(m, "Head", HEAD_R * 2, HEAD_TOP - 4, Vector3.new(0, (HEAD_TOP + 4) / 2, 0), skin)
+	-- the rounded top: a ball whose lower half hides inside the straight part
+	ball(m, "HeadRound", HEAD_R * 2, CFrame.new(0, HEAD_TOP, 0), skin)
 end
 
 -- ===== Outfits (on top of the body) =====
@@ -301,8 +319,17 @@ function OUTFITS.Miko(m, look)
 end
 
 -- ===== Faces (drawn with thin parts so they show in menu pictures too) =====
+-- The face is drawn at FACE_SCALE of the sizes below and FACE_Y lower than the middle of the
+-- head, so it fits in the skin that shows between the hair and the shoulders.
+local FACE_SCALE = 0.7
+local FACE_Y = -0.13
+
+-- A flat face feature w x h at (x, y) on the face, lying on the curve of the head
 local function feature(m, name, w, h, x, y, rot, color, material, dz)
-	return add(m, name, Vector3.new(w, h, 0.05), H(x, y, FRONT - (dz or 0)) * CFrame.Angles(0, 0, R(rot or 0)), color, material)
+	w, h, x, y = w * FACE_SCALE, h * FACE_SCALE, x * FACE_SCALE, FACE_Y + y * FACE_SCALE
+	local r = headRadius(y) + 0.015 + (dz or 0)
+	local a = math.asin(math.clamp(x / r, -1, 1))
+	return add(m, name, Vector3.new(w, h, 0.05), H(math.sin(a) * r, y, -math.cos(a) * r) * CFrame.Angles(0, -a, R(rot or 0)), color, material)
 end
 
 -- A curve of short strokes from x = -w to w around (cx, cy): a smile when bend > 0
@@ -355,8 +382,11 @@ function FACES.Calm(m, look)
 end
 
 function FACES.Cool(m, look)
-	feature(m, "Shades", 0.95, 0.24, 0, 0.1, 0, DARK, Enum.Material.Glass)
-	feature(m, "Glint", 0.12, 0.05, 0.2, 0.17, 20, WHITE, Enum.Material.Neon, 0.01)
+	for _, x in ipairs({ -0.25, 0.25 }) do
+		feature(m, "Shades", 0.4, 0.26, x, 0.1, 0, DARK, Enum.Material.Glass)
+	end
+	feature(m, "Shades", 0.14, 0.06, 0, 0.16, 0, DARK, Enum.Material.Glass)
+	feature(m, "Glint", 0.12, 0.05, 0.3, 0.17, 20, WHITE, Enum.Material.Neon, 0.01)
 	feature(m, "Mouth", 0.22, 0.05, 0.08, -0.24, 10, MOUTH)
 end
 
@@ -378,168 +408,251 @@ end
 
 function FACES.Visor() end -- the helmet covers the face
 
--- ===== Hair, hats and helmets =====
+-- ===== Hair, hats and helmets (fitted to the round head) =====
+-- Most styles start from the same pieces: a cap of hair fitted close over the skull and
+-- straight down the back and sides to the shoulders (set back so the face stays clear), a
+-- lock down each side of the face, and a band where the hair meets the forehead.
 local HAIR = {}
 
-local function cap(m, color, height)
-	add(m, "Hair", Vector3.new(1.34, height or 0.36, 1.34), H(0, 0.5, 0.02), color)
+local HAIR_TOP = HEAD_TOP + 0.06     -- the middle of the hair cap's dome
+local HAIR_SIZE = HEAD_R * 2 + 0.08  -- how wide the hair cap is
+local HAIR_BACK = 0.06               -- how far the hair cap is set back from the face
+local BAND_Y = HEAD_TOP + 0.13       -- the middle of a headband, tiara or helmet rim
+local BAND_SIZE = HEAD_R * 2 + 0.1
+
+-- An upright cylinder turned by `cf` (for tilted cones, crowns and hat pieces)
+local function uprightAt(m, name, diameter, height, cf, color, material)
+	local p = add(m, name, Vector3.new(height, diameter, diameter), cf * CFrame.Angles(0, 0, R(90)), color, material)
+	p.Shape = Enum.PartType.Cylinder
+	return p
+end
+
+-- A round rod from one point to another, with a ball on the far end (ponytails, horns, ears)
+local function rod(m, name, diameter, from, to, color, material, noEnd)
+	local mid = (from + to) / 2
+	local dir = to - from
+	-- (nudge a straight-up rod a hair off vertical, so its facing is well defined)
+	local aim = math.abs(dir.Unit.Y) > 0.999 and to + Vector3.new(0, 0, 0.001) or to
+	local p = add(m, name, Vector3.new(dir.Magnitude, diameter, diameter), CFrame.lookAt(mid, aim) * CFrame.Angles(0, R(90), 0), color, material)
+	p.Shape = Enum.PartType.Cylinder
+	if not noEnd then
+		ball(m, name .. "End", diameter, CFrame.new(to), color, material)
+	end
+	return p
+end
+
+-- The cap of hair over the skull and down the back (to `down`, the shoulders by default)
+local function hairCap(m, color, down)
+	local bottom = down or 4
+	ball(m, "Hair", HAIR_SIZE, CFrame.new(0, HAIR_TOP, HAIR_BACK), color)
+	upright(m, "HairBack", HAIR_SIZE, HAIR_TOP - bottom, Vector3.new(0, (HAIR_TOP + bottom) / 2, HAIR_BACK), color)
+end
+
+-- A lock of hair down each side of the face, to `down` (the chin by default)
+local function sideLocks(m, color, down)
+	local bottom = down or 4.12
+	for _, side in ipairs({ -1, 1 }) do
+		upright(m, "Lock", 0.2, HEAD_TOP - bottom, Vector3.new(side * 0.44, (HEAD_TOP + bottom) / 2, -0.38), color)
+		ball(m, "LockEnd", 0.2, CFrame.new(side * 0.44, bottom, -0.38), color)
+	end
+end
+
+-- Long hair falling down the back, over the shoulder blades
+local function longBack(m, color)
+	add(m, "HairLong", Vector3.new(1.2, 1.3, 0.24), CFrame.new(0, 3.55, 0.6), color)
+	local tip = add(m, "HairLong", Vector3.new(1.2, 0.24, 0.24), CFrame.new(0, 2.9, 0.6), color)
+	tip.Shape = Enum.PartType.Cylinder
+end
+
+-- A band round the head where the hair meets the forehead
+local function band(m, name, color, material, height)
+	return upright(m, name, BAND_SIZE, height or 0.18, Vector3.new(0, BAND_Y, 0), color, material)
+end
+
+-- A row of short pieces following the curve of something round (a visor slit, a tiara's edge)
+local function arc(m, name, radius, y, fromDeg, toDeg, pieces, height, thickness, color, material)
+	local step = (toDeg - fromDeg) / pieces
+	for i = 0, pieces - 1 do
+		local a = R(fromDeg + (i + 0.5) * step)
+		local length = 2 * radius * math.sin(R(math.abs(step)) / 2) + 0.02
+		add(m, name, Vector3.new(length, height, thickness),
+			CFrame.new(math.sin(a) * radius, y, -math.cos(a) * radius) * CFrame.Angles(0, -a, 0), color, material)
+	end
 end
 
 function HAIR.Headband(m, look) -- (bald, like the classic noob)
-	add(m, "Headband", Vector3.new(1.32, 0.26, 1.32), H(0, 0.22, 0), look.Accent)
+	band(m, "Headband", look.Accent)
 	for _, side in ipairs({ -1, 1 }) do
-		add(m, "BandTail", Vector3.new(0.2, 0.7, 0.1), H(side * 0.15, -0.05, 0.72) * CFrame.Angles(R(-15), 0, R(side * 15)), look.Accent)
+		add(m, "BandTail", Vector3.new(0.2, 0.7, 0.1), CFrame.new(side * 0.15, BAND_Y - 0.3, HEAD_R + 0.1) * CFrame.Angles(R(-15), 0, R(side * 15)), look.Accent)
 	end
 end
 
 function HAIR.Ponytail(m, look)
 	local c = look.HairColor
-	cap(m, c)
-	add(m, "HairBack", Vector3.new(1.34, 0.9, 0.3), H(0, 0.1, 0.55), c)
-	add(m, "Bangs", Vector3.new(1.34, 0.22, 0.2), H(0, 0.45, -0.6), c)
-	add(m, "Ponytail", Vector3.new(0.45, 1.3, 0.45), H(0, -0.3, 0.95) * CFrame.Angles(R(20), 0, 0), c)
-	add(m, "HairTie", Vector3.new(0.5, 0.15, 0.5), H(0, 0.3, 0.8), look.Accent)
+	hairCap(m, c)
+	sideLocks(m, c)
+	-- tied high at the back, falling down behind
+	local tie = Vector3.new(0, HEAD_TOP + 0.15, HEAD_R + 0.1)
+	ball(m, "HairTie", 0.34, CFrame.new(tie), look.Accent)
+	rod(m, "Ponytail", 0.4, tie + Vector3.new(0, 0, 0.1), Vector3.new(0, 3.75, HEAD_R + 0.42), c)
 end
 
 function HAIR.Hood(m, look)
 	local c = look.HairColor
-	add(m, "HoodTop", Vector3.new(1.55, 0.25, 1.55), H(0, 0.72, 0.05), c)
-	add(m, "HoodBack", Vector3.new(1.55, 1.5, 0.25), H(0, 0.05, 0.74), c)
-	for _, side in ipairs({ -1, 1 }) do
-		add(m, "HoodSide", Vector3.new(0.25, 1.45, 1.45), H(side * 0.76, 0.05, 0.05), c)
-	end
-	add(m, "HoodPeak", Vector3.new(1.55, 0.25, 0.2), H(0, 0.6, -0.7), c)
-	add(m, "Mask", Vector3.new(1.3, 0.6, 0.12), H(0, -0.3, -0.68), look.Pants)
+	-- a hood over the head and down the back, open round the face, and a mask over the
+	-- mouth and nose
+	ball(m, "HoodTop", HEAD_R * 2 + 0.22, CFrame.new(0, HEAD_TOP + 0.1, 0.14), c, Enum.Material.Fabric)
+	upright(m, "HoodBack", HEAD_R * 2 + 0.22, HEAD_TOP + 0.1 - 3.95, Vector3.new(0, (HEAD_TOP + 0.1 + 3.95) / 2, 0.14), c, Enum.Material.Fabric)
+	upright(m, "Mask", HEAD_R * 2 + 0.04, 0.4, Vector3.new(0, 4.2, 0), look.Pants, Enum.Material.Fabric)
 end
 
+-- A metal helmet over the skull and down the back, set back so the face shows, with a rim
+-- at the band and guards over the cheeks. Returns the height of its top.
+local HELMET_SIZE = HEAD_R * 2 + 0.28
+local HELMET_Y = HEAD_TOP + 0.1
+local HELMET_BACK = 0.16
 local function helmetDome(m, metal)
-	add(m, "Helmet", Vector3.new(1.45, 0.55, 1.45), H(0, 0.5, 0), metal, Enum.Material.Metal)
-	add(m, "HelmetBand", Vector3.new(1.47, 0.2, 1.47), H(0, 0.25, 0), metal, Enum.Material.Metal)
+	ball(m, "Helmet", HELMET_SIZE, CFrame.new(0, HELMET_Y, HELMET_BACK), metal, Enum.Material.Metal)
+	upright(m, "HelmetBack", HELMET_SIZE, HELMET_Y - 4, Vector3.new(0, (HELMET_Y + 4) / 2, HELMET_BACK), metal, Enum.Material.Metal)
+	upright(m, "HelmetBand", HELMET_SIZE + 0.06, 0.16, Vector3.new(0, BAND_Y, 0.08), metal, Enum.Material.Metal)
 	for _, side in ipairs({ -1, 1 }) do
-		add(m, "Cheek", Vector3.new(0.18, 0.9, 1.3), H(side * 0.73, -0.05, 0.05), metal, Enum.Material.Metal)
+		add(m, "Cheek", Vector3.new(0.1, 0.55, 0.45), CFrame.new(side * 0.64, 4.36, -0.22), metal, Enum.Material.Metal)
 	end
+	return HELMET_Y + HELMET_SIZE / 2
 end
 
 function HAIR.KnightHelm(m, look)
 	local metal = look.Metal or METAL
-	helmetDome(m, metal)
-	add(m, "NoseGuard", Vector3.new(0.16, 0.55, 0.1), H(0, 0.05, -0.69), metal, Enum.Material.Metal)
-	add(m, "Plume", Vector3.new(0.22, 0.6, 1.3), H(0, 1.0, 0.1), look.Accent)
-	add(m, "PlumeTail", Vector3.new(0.22, 0.8, 0.4), H(0, 0.7, 0.8), look.Accent)
+	local top = helmetDome(m, metal)
+	add(m, "NoseGuard", Vector3.new(0.1, 0.36, 0.06), CFrame.new(0, 4.6, -HEAD_R - 0.05), metal, Enum.Material.Metal)
+	add(m, "Plume", Vector3.new(0.2, 0.45, 1.1), CFrame.new(0, top + 0.12, 0.1), look.Accent)
+	add(m, "PlumeTail", Vector3.new(0.2, 0.7, 0.35), CFrame.new(0, top - 0.25, 0.72), look.Accent)
 end
 
 function HAIR.BucketHelm(m, look)
 	local metal = look.Metal or METAL
-	add(m, "Helmet", Vector3.new(1.45, 1.45, 1.45), H(0, 0, 0), metal, Enum.Material.Metal)
-	add(m, "Visor", Vector3.new(1.15, 0.12, 0.05), H(0, 0.1, -0.74), DARK)
+	-- a closed round helmet with a visor slit and breathing holes
+	local size = HEAD_R * 2 + 0.16
+	upright(m, "Helmet", size, HEAD_TOP - 3.98, Vector3.new(0, (HEAD_TOP + 3.98) / 2, 0), metal, Enum.Material.Metal)
+	ball(m, "HelmetTop", size, CFrame.new(0, HEAD_TOP, 0), metal, Enum.Material.Metal)
+	arc(m, "Visor", size / 2 + 0.01, 4.5, -50, 50, 8, 0.1, 0.05, DARK)
 	for k = -1, 1 do
-		add(m, "Vent", Vector3.new(0.1, 0.25, 0.05), H(k * 0.25, -0.3, -0.74), DARK)
+		local a = R(k * 18)
+		add(m, "Vent", Vector3.new(0.08, 0.22, 0.05), CFrame.new(math.sin(a) * (size / 2 + 0.01), 4.2, -math.cos(a) * (size / 2 + 0.01)) * CFrame.Angles(0, -a, 0), DARK)
 	end
-	add(m, "Crest", Vector3.new(0.18, 0.35, 1.2), H(0, 0.9, 0), look.Accent)
+	add(m, "Crest", Vector3.new(0.16, 0.3, 1.0), CFrame.new(0, HEAD_TOP + size / 2 + 0.05, 0), look.Accent)
 end
 
 function HAIR.WizardHat(m, look)
 	local hat = look.HatColor or look.Shirt
-	disc(m, "Brim", 2.4, 0.15, H(0, 0.68, 0).Position, hat)
-	add(m, "Cone1", Vector3.new(1.1, 0.55, 1.1), H(0, 0.98, 0.05), hat)
-	add(m, "Cone2", Vector3.new(0.75, 0.55, 0.75), H(0, 1.48, 0.15) * CFrame.Angles(R(-10), 0, 0), hat)
-	add(m, "Cone3", Vector3.new(0.42, 0.6, 0.42), H(0, 1.95, 0.35) * CFrame.Angles(R(-25), 0, 0), hat)
-	add(m, "HatBand", Vector3.new(1.14, 0.15, 1.14), H(0, 0.8, 0.05), look.Glow or look.Accent, Enum.Material.Neon)
+	hairCap(m, look.HairColor)
+	sideLocks(m, look.HairColor)
+	-- a wide brim just above the brows, and a cone that bends back to a point
+	local brim = BAND_Y + 0.1
+	disc(m, "Brim", 2.3, 0.12, Vector3.new(0, brim, 0), hat)
+	upright(m, "HatBand", 1.4, 0.14, Vector3.new(0, brim + 0.13, 0.03), look.Glow or look.Accent, Enum.Material.Neon)
+	-- (each piece of the cone a little narrower, higher, further back and more tilted)
+	for i, s in ipairs({ { 1.32, 0.25, 0.03, 0 }, { 1.06, 0.6, 0.08, -6 }, { 0.82, 0.92, 0.16, -14 }, { 0.58, 1.22, 0.28, -24 }, { 0.36, 1.47, 0.44, -36 } }) do
+		uprightAt(m, "Cone" .. i, s[1], 0.42, CFrame.new(0, brim + s[2], s[3]) * CFrame.Angles(R(s[4]), 0, 0), hat)
+	end
+	ball(m, "HatTip", 0.22, CFrame.new(0, brim + 1.62, 0.6), hat)
 end
 
-local function longHair(m, look)
+function HAIR.LongHair(m, look)
 	local c = look.HairColor
-	cap(m, c, 0.35)
-	add(m, "HairBack", Vector3.new(1.35, 2.3, 0.3), H(0, -0.45, 0.6), c)
-	add(m, "Bangs", Vector3.new(1.35, 0.25, 0.2), H(0, 0.42, -0.6), c)
-	for _, side in ipairs({ -1, 1 }) do
-		add(m, "SideLock", Vector3.new(0.22, 1.4, 0.9), H(side * 0.68, -0.1, 0.1), c)
-	end
+	hairCap(m, c)
+	sideLocks(m, c, 4.02)
+	longBack(m, c)
 end
-HAIR.LongHair = longHair
 
 function HAIR.Topknot(m, look)
 	local c = look.HairColor
-	cap(m, c)
-	add(m, "HairBack", Vector3.new(1.34, 0.8, 0.3), H(0, 0.15, 0.55), c)
-	for i, s in ipairs({ { -0.4, -0.35, 25, 20 }, { 0.4, -0.35, 25, -20 }, { 0, -0.5, 40, 0 } }) do
-		add(m, "Spike" .. i, Vector3.new(0.35, 0.55, 0.35), H(s[1], 0.75, s[2]) * CFrame.Angles(R(-s[3]), 0, R(s[4])), c)
-	end
-	add(m, "Topknot", Vector3.new(0.45, 0.5, 0.45), H(0, 1.0, 0.2), c)
-	add(m, "KnotTie", Vector3.new(0.5, 0.12, 0.5), H(0, 0.78, 0.2), look.Glow or look.Accent)
-	add(m, "Headband", Vector3.new(1.36, 0.18, 1.36), H(0, 0.3, 0), look.Glow or look.Accent)
+	hairCap(m, c)
+	sideLocks(m, c)
+	band(m, "Headband", look.Glow or look.Accent)
+	upright(m, "KnotTie", 0.4, 0.12, Vector3.new(0, HEAD_Y + 0.82, 0.16), look.Glow or look.Accent)
+	ball(m, "Topknot", 0.48, H(0, 1.0, 0.16), c)
+	add(m, "KnotTail", Vector3.new(0.24, 0.5, 0.24), H(0, 0.95, 0.48) * CFrame.Angles(R(55), 0, 0), c)
 end
 
 function HAIR.StrawHat(m, look)
 	local straw = rgb(225, 195, 115)
-	cap(m, look.HairColor, 0.3)
-	add(m, "HairBack", Vector3.new(1.34, 0.8, 0.3), H(0, 0.15, 0.55), look.HairColor)
-	disc(m, "Brim", 2.6, 0.12, H(0, 0.62, 0).Position, straw, Enum.Material.Fabric)
-	add(m, "Crown1", Vector3.new(1.15, 0.35, 1.15), H(0, 0.85, 0), straw, Enum.Material.Fabric)
-	add(m, "Crown2", Vector3.new(0.6, 0.3, 0.6), H(0, 1.12, 0), straw, Enum.Material.Fabric)
-	add(m, "Band", Vector3.new(1.18, 0.1, 1.18), H(0, 0.72, 0), look.Vest or look.Accent)
+	hairCap(m, look.HairColor)
+	sideLocks(m, look.HairColor)
+	local brim = BAND_Y + 0.08
+	disc(m, "Brim", 2.5, 0.1, Vector3.new(0, brim, 0), straw, Enum.Material.Fabric)
+	upright(m, "Crown1", HAIR_SIZE + 0.06, 0.5, Vector3.new(0, brim + 0.25, HAIR_BACK), straw, Enum.Material.Fabric)
+	upright(m, "Band", HAIR_SIZE + 0.1, 0.12, Vector3.new(0, brim + 0.12, HAIR_BACK), look.Vest or look.Accent)
+	upright(m, "Crown2", 0.85, 0.2, Vector3.new(0, brim + 0.6, HAIR_BACK), straw, Enum.Material.Fabric)
 end
 
 function HAIR.HornedHelm(m, look)
 	local metal = look.Metal or METAL
-	helmetDome(m, metal)
-	add(m, "Crest", Vector3.new(0.18, 0.3, 1.3), H(0, 0.85, 0), look.Accent, Enum.Material.Metal)
+	local top = helmetDome(m, metal)
+	add(m, "Crest", Vector3.new(0.16, 0.26, 1.15), CFrame.new(0, top, 0.08), look.Accent, Enum.Material.Metal)
+	local bone = rgb(235, 225, 200)
 	for _, side in ipairs({ -1, 1 }) do
-		local base = H(side * 0.62, 0.55, 0.05) * CFrame.Angles(R(20), 0, R(-side * 40))
-		add(m, "Horn", Vector3.new(0.26, 0.75, 0.26), base * CFrame.new(0, 0.3, 0), rgb(235, 225, 200))
-		add(m, "HornTip", Vector3.new(0.18, 0.55, 0.18), base * CFrame.new(0, 0.8, 0.1) * CFrame.Angles(R(25), 0, 0), rgb(235, 225, 200))
+		local base = Vector3.new(side * 0.5, HEAD_TOP + 0.25, 0.05)
+		local bend = Vector3.new(side * 0.95, HEAD_TOP + 0.62, 0.1)
+		rod(m, "Horn", 0.26, base, bend, bone)
+		rod(m, "HornTip", 0.16, bend, Vector3.new(side * 1.02, HEAD_TOP + 1.05, 0.28), bone)
 	end
 end
 
 function HAIR.Halo(m, look)
-	longHair(m, look)
+	HAIR.LongHair(m, look)
 	-- a ring of light floating over the head
 	for k = 1, 12 do
 		local a = R(k * 30)
-		add(m, "Halo", Vector3.new(0.42, 0.1, 0.14), H(math.cos(a) * 0.7, 1.15, math.sin(a) * 0.7) * CFrame.Angles(0, -a + R(90), 0),
+		add(m, "Halo", Vector3.new(0.42, 0.1, 0.14), CFrame.new(math.cos(a) * 0.62, HEAD_TOP + 0.95, math.sin(a) * 0.62 + HAIR_BACK) * CFrame.Angles(0, -a + R(90), 0),
 			look.Glow or GOLD, Enum.Material.Neon)
 	end
 end
 
 function HAIR.Crown(m, look)
 	local c = look.HairColor
-	cap(m, c)
-	add(m, "HairBack", Vector3.new(1.34, 1.1, 0.3), H(0, 0, 0.55), c)
-	add(m, "CrownBand", Vector3.new(1.42, 0.3, 1.42), H(0, 0.68, 0), GOLD, Enum.Material.Metal)
-	for i, p in ipairs({ { 0, -0.66 }, { 0.66, 0 }, { 0, 0.66 }, { -0.66, 0 }, { 0.47, -0.47 }, { -0.47, -0.47 } }) do
-		add(m, "CrownPoint" .. i, Vector3.new(0.2, 0.45, 0.2), H(p[1], 0.98, p[2]) * CFrame.Angles(0, R(45), 0), GOLD, Enum.Material.Metal)
+	hairCap(m, c)
+	sideLocks(m, c)
+	local y = BAND_Y + 0.1
+	upright(m, "CrownBand", BAND_SIZE + 0.04, 0.3, Vector3.new(0, y, 0), GOLD, Enum.Material.Metal)
+	for i = 1, 8 do
+		local a = R(i * 45)
+		add(m, "CrownPoint" .. i, Vector3.new(0.2, 0.4, 0.2), CFrame.new(math.sin(a) * 0.62, y + 0.32, -math.cos(a) * 0.62) * CFrame.Angles(0, -a + R(45), 0), GOLD, Enum.Material.Metal)
 	end
-	ball(m, "CrownGem", 0.26, H(0, 0.7, -0.73), look.Glow or look.Accent, Enum.Material.Neon)
+	ball(m, "CrownGem", 0.24, CFrame.new(0, y, -BAND_SIZE / 2 - 0.06), look.Glow or look.Accent, Enum.Material.Neon)
 end
 
 function HAIR.FoxEars(m, look)
-	longHair(m, look)
+	HAIR.LongHair(m, look)
 	for _, side in ipairs({ -1, 1 }) do
-		local ear = H(side * 0.42, 0.9, 0.05) * CFrame.Angles(0, 0, R(-side * 18))
-		add(m, "Ear", Vector3.new(0.5, 0.55, 0.28), ear, look.HairColor)
-		add(m, "EarTip", Vector3.new(0.28, 0.25, 0.28), ear * CFrame.new(side * 0.06, 0.38, 0), look.HairColor)
-		add(m, "EarInner", Vector3.new(0.26, 0.36, 0.05), ear * CFrame.new(0, 0, -0.15), look.Accent)
+		local ear = CFrame.new(side * 0.4, HEAD_TOP + 0.5, 0.08) * CFrame.Angles(0, 0, R(-side * 32))
+		add(m, "Ear", Vector3.new(0.46, 0.4, 0.24), ear, look.HairColor)
+		add(m, "EarTip", Vector3.new(0.24, 0.2, 0.24), ear * CFrame.new(side * 0.05, 0.28, 0), look.HairColor)
+		add(m, "EarInner", Vector3.new(0.22, 0.28, 0.05), ear * CFrame.new(0, -0.02, -0.13), look.Accent)
 	end
 end
 
 function HAIR.Crescent(m, look)
-	longHair(m, look)
-	add(m, "Tiara", Vector3.new(1.37, 0.12, 1.37), H(0, 0.28, 0), rgb(220, 225, 240), Enum.Material.Metal)
-	-- a crescent moon on the brow
+	HAIR.LongHair(m, look)
+	band(m, "Tiara", rgb(220, 225, 240), Enum.Material.Metal, 0.12)
+	-- a crescent moon standing on the front of the tiara
+	local front = -BAND_SIZE / 2 - 0.04
 	for k = -2, 2 do
 		local a = R(k * 30)
-		feature(m, "Moon", 0.16, 0.08, math.sin(a) * 0.18, 0.62 - math.cos(a) * 0.12, k * 30, look.Glow or WHITE, Enum.Material.Neon, 0.02)
+		add(m, "Moon", Vector3.new(0.22, 0.11, 0.05), CFrame.new(math.sin(a) * 0.25, BAND_Y + 0.3 - math.cos(a) * 0.17, front) * CFrame.Angles(0, 0, R(k * 30)),
+			look.Glow or WHITE, Enum.Material.Neon)
 	end
 end
 
 function HAIR.Hairpin(m, look)
-	longHair(m, look)
-	-- a big bow at the back and a golden hairpin
+	HAIR.LongHair(m, look)
+	-- a big bow at the back and a golden hairpin through the side
 	for _, side in ipairs({ -1, 1 }) do
-		add(m, "HairBow", Vector3.new(0.55, 0.4, 0.12), H(side * 0.3, 0.45, 0.8) * CFrame.Angles(0, 0, R(side * 20)), look.Accent)
+		add(m, "HairBow", Vector3.new(0.5, 0.36, 0.12), CFrame.new(side * 0.28, HEAD_TOP + 0.2, HAIR_SIZE / 2 + HAIR_BACK + 0.05) * CFrame.Angles(0, 0, R(side * 20)), look.Accent)
 	end
-	add(m, "Hairpin", Vector3.new(0.08, 0.08, 0.9), H(0.55, 0.45, 0.2) * CFrame.Angles(0, R(30), 0), GOLD, Enum.Material.Metal)
-	ball(m, "PinBead", 0.2, H(0.62, 0.45, -0.2), GOLD, Enum.Material.Neon)
+	ball(m, "BowKnot", 0.22, CFrame.new(0, HEAD_TOP + 0.2, HAIR_SIZE / 2 + HAIR_BACK + 0.06), look.Accent)
+	add(m, "Hairpin", Vector3.new(0.07, 0.07, 0.85), CFrame.new(0.5, HEAD_TOP + 0.3, 0.18) * CFrame.Angles(0, R(30), 0), GOLD, Enum.Material.Metal)
+	ball(m, "PinBead", 0.18, CFrame.new(0.6, HEAD_TOP + 0.3, -0.18), GOLD, Enum.Material.Neon)
 end
 
 -- ===== Weapons (held in the hands at the bottom of the arms; right is +X, the front is -Z) =====
@@ -669,7 +782,7 @@ local function addTails(m, count, color, tipColor)
 end
 
 local function addScarf(m, color)
-	add(m, "Scarf", Vector3.new(1.3, 0.35, 1.2), CFrame.new(0, 4.05, 0), color, Enum.Material.Fabric)
+	upright(m, "Scarf", HEAD_R * 2 + 0.26, 0.32, Vector3.new(0, 4.1, 0.04), color, Enum.Material.Fabric)
 	add(m, "ScarfTail", Vector3.new(0.4, 1.4, 0.12), CFrame.new(0.45, 3.5, 0.65) * CFrame.Angles(R(15), 0, R(-10)), color, Enum.Material.Fabric)
 end
 
@@ -710,10 +823,11 @@ local function buildCharacter(unitName, look)
 	local face = FACES[look.Face] or FACES.Smile
 	face(model, look)
 	if look.Beard then
-		add(model, "Beard", Vector3.new(0.95, 0.75, 0.3), H(0, -0.6, -0.58), look.HairColor or WHITE)
+		add(model, "Beard", Vector3.new(0.8, 0.55, 0.24), CFrame.new(0, 3.9, -0.6), look.HairColor or WHITE)
+		add(model, "BeardTip", Vector3.new(0.46, 0.3, 0.22), CFrame.new(0, 3.48, -0.6), look.HairColor or WHITE)
 	end
 	if look.Mustache then
-		add(model, "Mustache", Vector3.new(0.6, 0.12, 0.1), H(0, -0.13, FRONT + 0.02 - 0.05), look.HairColor or DARK)
+		feature(model, "Mustache", 0.6, 0.12, 0, -0.14, 0, look.HairColor or DARK, nil, 0.02)
 	end
 	local hair = HAIR[look.Hair]
 	if hair then hair(model, look) end
