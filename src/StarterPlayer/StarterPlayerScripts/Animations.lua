@@ -1,8 +1,9 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: Animations
--- (replaces the earlier version: the Eclipse Emperor thrusts his sword straight up into the
---  eclipse, then slams it down; the eclipse collapses and streaks down after the blade)
+-- (replaces the earlier version: units' legs can move in an attack (LegL / LegR): the Eclipse
+--  Emperor leaps with one leg kicked up and the other trailing, his left arm swept back, and
+--  lands in a wide stance on the slam)
 -- Every attack shows an effect that suits the weapon: slash crescents for swords, a magic
 -- circle and a bursting orb for mages, a streak and shockwave for lances, glowing arrows for
 -- bows (see ATTACK EFFECTS below). Special units can have a signature attack of their own
@@ -54,7 +55,8 @@ local DEFAULT_WALK = WALKS.Normal
 
 -- ===== UNITS: attacks =====
 -- Each pose is a list of { time (0 to 1 through the attack), angle in degrees } for that arm;
--- positive lifts the arm forward and up. Lunge pushes the whole body forward (studs), Rise
+-- positive lifts the arm forward and up. LegL / LegR swing the legs the same way (positive
+-- kicks the leg forward). Lunge pushes the whole body forward (studs), Rise
 -- lifts it off the ground (studs). Grip turns a staff, bow or lance in its hand (see UnitModels.Rig).
 
 -- A bow's Grip that keeps it upright while the bow arm is raised `armAngle` degrees: it undoes
@@ -126,8 +128,14 @@ local ATTACKS = {
 	Eclipse = {
 		Time = 0.8,
 		ArmR = { { 0, 0 }, { 0.35, 180 }, { 0.44, 180 }, { 0.5, 75 }, { 0.75, 75 }, { 1, 0 } },
-		ArmL = { { 0, 0 }, { 0.35, 172 }, { 0.44, 172 }, { 0.5, 70 }, { 0.75, 70 }, { 1, 0 } },
+		-- (in the air his left arm sweeps back behind him, as he reaches up with the sword, and
+		-- comes forward with the sword arm on the slam)
+		ArmL = { { 0, 0 }, { 0.3, -40 }, { 0.44, -48 }, { 0.5, 70 }, { 0.75, 70 }, { 1, 0 } },
 		Grip = { { 0, 0 }, { 0.35, -145 }, { 0.44, -145 }, { 0.5, -150 }, { 0.75, -150 }, { 1, 0 } },
+		-- a leap: the right leg kicks up in front, the left trails behind, and he lands in a wide
+		-- stance
+		LegR = { { 0, 0 }, { 0.25, 40 }, { 0.44, 46 }, { 0.5, 22 }, { 0.75, 22 }, { 1, 0 } },
+		LegL = { { 0, 0 }, { 0.25, -30 }, { 0.44, -36 }, { 0.5, -16 }, { 0.75, -16 }, { 1, 0 } },
 		Lunge = { { 0, 0 }, { 0.35, -0.2 }, { 0.44, -0.3 }, { 0.5, 1.0 }, { 0.75, 1.0 }, { 1, 0 } },
 		Rise = { { 0, 0 }, { 0.35, 0.8 }, { 0.44, 0.9 }, { 0.5, 0 }, { 1, 0 } },
 	},
@@ -1012,7 +1020,7 @@ RunService.RenderStepped:Connect(function(dt)
 			local breath = math.sin((clock * 0.5 + entry.Phase) * TAU)
 			local sway = breath * 3
 			-- (Grip turns a staff, bow or lance in its hand, see UnitModels.Rig; only some poses use it)
-			local arms = { ArmL = sway, ArmR = -sway, Grip = 0 }
+			local arms = { ArmL = sway, ArmR = -sway, Grip = 0, LegL = 0, LegR = 0 }
 			local lunge, rise = 0, 0
 
 			local pose = ATTACKS[entry.Style]
@@ -1021,6 +1029,8 @@ RunService.RenderStepped:Connect(function(dt)
 				arms.ArmR += sample(pose.ArmR, t)
 				arms.ArmL += sample(pose.ArmL, t)
 				arms.Grip += sample(pose.Grip, t)
+				arms.LegL += sample(pose.LegL, t)
+				arms.LegR += sample(pose.LegR, t)
 				lunge = sample(pose.Lunge, t)
 				rise = sample(pose.Rise, t)
 			elseif entry.Style == "Farm" and entry.PaidAt then

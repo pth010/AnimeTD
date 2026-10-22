@@ -1,8 +1,8 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: UnitModels
--- (replaces the earlier version: the Eclipse Emperor's attack lands a moment later (0.4s), as
---  he first stabs his sword up into the eclipse before slamming it down)
+-- (replaces the earlier version: units' legs are on hip joints too (LegL / LegR), so attacks
+--  can move them: the Eclipse Emperor leaps)
 -- Builds the character model for each unit out of parts (no uploaded assets needed).
 -- Every unit has a "look" below. Change them freely.
 --
@@ -16,8 +16,8 @@
 -- UnitModels.Portrait(unitName, full) returns a ViewportFrame picture of the unit for menus:
 --   head and shoulders by default, or the whole body when `full` is true.
 -- UnitModels.Rig(model, hitbox, feet) fixes a built model to its (anchored) hitbox for a match:
---   a "Facing" joint (turn the unit with UnitModels.Face) and a joint at each "Arm" (a Motor6D
---   named "Limb", attribute ArmL / ArmR). Hands and what they hold move with their arm, and a
+--   a "Facing" joint (turn the unit with UnitModels.Face) and a joint at each "Arm" and "Leg" (a
+--   Motor6D named "Limb", attribute ArmL / ArmR / LegL / LegR; shoes and greaves go with the leg). Hands and what they hold move with their arm, and a
 --   staff, bow or lance can also turn in its hand (a Motor6D named "Grip", attribute Limb = "Grip").
 --   UnitModels.AttackStyle(unitName) says how it attacks: "Slash", "DualSlash", "Thrust",
 --   "Cast", "Shoot", or "Farm" for cash units.
@@ -1003,6 +1003,9 @@ local GRIPPED = {
 	Guard = true, Blade = true, Edge = true, -- (a sword, for units in SWORD_GRIP)
 }
 
+-- Parts that move with the leg on their side
+local LEG_HELD = { Shoe = true, Greave = true }
+
 -- Units whose sword turns in the hand on a Grip joint too, like a staff, so their attack can
 -- swing the blade round (the Eclipse Emperor chops down at the enemy with it)
 local SWORD_GRIP = { ["Eclipse Emperor"] = true }
@@ -1070,13 +1073,14 @@ function UnitModels.Rig(model, hitbox, feet)
 	facing.C1 = root.CFrame:Inverse() * feet
 	facing.Parent = root
 
-	local parts, arms = {}, {}
+	local parts, arms, legs = {}, {}, {}
 	for _, d in ipairs(model:GetDescendants()) do
 		if d:IsA("BasePart") then
 			table.insert(parts, d)
-			if d.Name == "Arm" and d ~= root then
-				-- an arm swings from its shoulder (the top of the arm)
-				local label = feet:PointToObjectSpace(d.Position).X < 0 and "ArmL" or "ArmR"
+			if (d.Name == "Arm" or d.Name == "Leg") and d ~= root then
+				-- an arm swings from its shoulder and a leg from its hip (the top of the part)
+				local left = feet:PointToObjectSpace(d.Position).X < 0
+				local label = d.Name == "Arm" and (left and "ArmL" or "ArmR") or (left and "LegL" or "LegR")
 				local pivot = CFrame.new((d.CFrame * CFrame.new(0, d.Size.Y / 2, 0)).Position) * feet.Rotation
 				local joint = Instance.new("Motor6D")
 				joint.Name = "Limb"
@@ -1086,7 +1090,7 @@ function UnitModels.Rig(model, hitbox, feet)
 				joint.C0 = root.CFrame:Inverse() * pivot
 				joint.C1 = d.CFrame:Inverse() * pivot
 				joint.Parent = d
-				arms[label] = d
+				if d.Name == "Arm" then arms[label] = d else legs[label] = d end
 			end
 		end
 	end
@@ -1127,6 +1131,8 @@ function UnitModels.Rig(model, hitbox, feet)
 				holder = staff
 			elseif HELD[base] then
 				holder = arms[feet:PointToObjectSpace(p.Position).X < 0 and "ArmL" or "ArmR"] or root
+			elseif LEG_HELD[base] then
+				holder = legs[feet:PointToObjectSpace(p.Position).X < 0 and "LegL" or "LegR"] or root
 			end
 			weld(holder, p)
 		end
