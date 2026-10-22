@@ -1,8 +1,8 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: UnitModels
--- (replaces the earlier version: the side locks are flat strands lying against the face that
---  end in a point, instead of round sticks)
+-- (replaces the earlier version: long hair, ponytails and the crown have a fringe of pointed
+--  strands across the forehead)
 -- Builds the character model for each unit out of parts (no uploaded assets needed).
 -- Every unit has a "look" below. Change them freely.
 --
@@ -469,6 +469,24 @@ local function sideLocks(m, color, down)
 	end
 end
 
+-- A fringe across the forehead: short flat strands that come down from under the hair cap,
+-- lie on the forehead (leaning back with its curve), sweep a little to the sides and end in a
+-- point just above the brows
+local function bangs(m, color)
+	local top, bottom = HEAD_TOP + 0.25, HEAD_TOP + 0.13
+	local length = top - bottom
+	for i, deg in ipairs({ -36, -18, 0, 18, 36 }) do
+		local a = R(deg)
+		local y = (top + bottom) / 2
+		local r = headRadius(y - HEAD_Y) + 0.025
+		local drop = (i % 2 == 0) and 0.04 or 0 -- every other strand a little longer
+		local strand = CFrame.new(math.sin(a) * r, y - drop / 2, -math.cos(a) * r) * CFrame.Angles(0, -a, 0)
+			* CFrame.Angles(R(-28), 0, R(deg * 0.35))
+		add(m, "Bang", Vector3.new(0.22, length + drop, 0.06), strand, color)
+		add(m, "BangEnd", Vector3.new(0.15, 0.15, 0.06), strand * CFrame.new(0, -(length + drop) / 2, 0) * CFrame.Angles(0, 0, R(45)), color)
+	end
+end
+
 -- Long hair falling down the back, over the shoulder blades
 local function longBack(m, color)
 	add(m, "HairLong", Vector3.new(1.2, 1.3, 0.24), CFrame.new(0, 3.55, 0.6), color)
@@ -503,6 +521,7 @@ function HAIR.Ponytail(m, look)
 	local c = look.HairColor
 	hairCap(m, c)
 	sideLocks(m, c)
+	bangs(m, c)
 	-- tied high at the back, falling down behind
 	local tie = Vector3.new(0, HEAD_TOP + 0.15, HEAD_R + 0.1)
 	ball(m, "HairTie", 0.34, CFrame.new(tie), look.Accent)
@@ -578,11 +597,12 @@ function HAIR.WizardHat(m, look)
 	ball(m, "HatTip", 0.22, CFrame.new(0, brim + 1.62, 0.6), hat)
 end
 
-function HAIR.LongHair(m, look)
+function HAIR.LongHair(m, look, noBangs)
 	local c = look.HairColor
 	hairCap(m, c)
 	sideLocks(m, c, 4.18)
 	longBack(m, c)
+	if not noBangs then bangs(m, c) end
 end
 
 function HAIR.Topknot(m, look)
@@ -634,7 +654,8 @@ function HAIR.Crown(m, look)
 	local c = look.HairColor
 	hairCap(m, c)
 	sideLocks(m, c)
-	local y = BAND_Y + 0.1
+	bangs(m, c)
+	local y = BAND_Y + 0.22 -- (worn up on the head, so the fringe shows under it)
 	upright(m, "CrownBand", BAND_SIZE + 0.04, 0.3, Vector3.new(0, y, 0), GOLD, Enum.Material.Metal)
 	for i = 1, 8 do
 		local a = R(i * 45)
@@ -644,7 +665,7 @@ function HAIR.Crown(m, look)
 end
 
 function HAIR.FoxEars(m, look)
-	HAIR.LongHair(m, look)
+	HAIR.LongHair(m, look, true)
 	for _, side in ipairs({ -1, 1 }) do
 		local ear = CFrame.new(side * 0.4, HEAD_TOP + 0.5, 0.08) * CFrame.Angles(0, 0, R(-side * 32))
 		add(m, "Ear", Vector3.new(0.46, 0.4, 0.24), ear, look.HairColor)
@@ -654,7 +675,7 @@ function HAIR.FoxEars(m, look)
 end
 
 function HAIR.Crescent(m, look)
-	HAIR.LongHair(m, look)
+	HAIR.LongHair(m, look, true)
 	band(m, "Tiara", rgb(220, 225, 240), Enum.Material.Metal, 0.12)
 	-- a crescent moon standing on the front of the tiara
 	local front = -BAND_SIZE / 2 - 0.04
