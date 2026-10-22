@@ -1,11 +1,14 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: EnemyModels
+-- (replaces the earlier version: adds the Ancient Golem ("Golem"), the Damage Challenge's
+--  boss)
 -- Builds the model for each enemy type out of parts (no uploaded assets needed):
 --   Normal -> Oni Grunt     a small red demon with a club
 --   Fast   -> Shadow Wolf   a low, quick wolf with glowing eyes
 --   Tank   -> Stone Golem   a huge rock golem with glowing runes
 --   Boss   -> Demon King    a giant armored demon with horns, a cape and a greatsword
+--   Golem  -> Ancient Golem the Stone Golem, built huge (the Damage Challenge's boss)
 --
 -- USING YOUR OWN MODELS: make a Folder in ReplicatedStorage named CustomEnemyModels and put
 -- a Model inside named exactly like the enemy type ("Normal", "Fast", "Tank" or "Boss").
@@ -13,7 +16,11 @@
 -- -Z direction (Roblox's default "front").
 --
 -- EnemyModels.Build(typeName, height) returns a Model whose pivot is at its feet, facing -Z.
--- EnemyModels.AttachTo(model, hitbox) welds it to the moving hitbox part.
+-- EnemyModels.AttachTo(model, hitbox) fixes it to the moving hitbox part. Parts named "Leg",
+-- "Arm" and "Tail" get a joint (a Motor6D named "Limb" with a "Limb" attribute: LegL, LegR,
+-- ArmL, ArmR, Tail, or LegA / LegB for four legs) so the Animations script can swing them.
+-- Hands, fists and weapons move with the arm on their side; everything else is welded.
+-- A custom model walks too if its parts use those names.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -220,6 +227,9 @@ local BUILDERS = {
 	Tank = function()
 		return buildGolem("Tank")
 	end,
+	Golem = function()
+		return buildGolem("Golem") -- (the same golem: GameService makes it huge)
+	end,
 	Boss = function()
 		return buildOni("Boss", {
 			Skin = rgb(120, 25, 35), Dark = rgb(30, 18, 25), Belt = rgb(30, 18, 25),
@@ -266,15 +276,79 @@ function EnemyModels.Build(typeName, height)
 end
 
 -- Welds every part of the model to the hitbox, so moving the hitbox moves the whole model
+-- What moves with an arm: the hand or fist, and whatever it holds
+local HELD = {
+	Hand = true, Fist = true,
+	Club = true, ClubHead = true, Spike1 = true, Spike2 = true, Spike3 = true,
+	Handle = true, Guard = true, Blade = true, BladeEdge = true,
+}
+
+local function weld(a, b)
+	local w = Instance.new("WeldConstraint")
+	w.Part0 = a
+	w.Part1 = b
+	w.Parent = b
+end
+
+-- A joint that turns `part` around `pivot` (a point), lined up with the hitbox
+local function limbJoint(hitbox, part, label, pivot)
+	local pivotCF = CFrame.new(pivot) * hitbox.CFrame.Rotation
+	local joint = Instance.new("Motor6D")
+	joint.Name = "Limb"
+	joint:SetAttribute("Limb", label)
+	joint.Part0 = hitbox
+	joint.Part1 = part
+	joint.C0 = hitbox.CFrame:Inverse() * pivotCF
+	joint.C1 = part.CFrame:Inverse() * pivotCF
+	joint.Parent = part
+end
+
 function EnemyModels.AttachTo(model, hitbox)
+	local parts, legs = {}, 0
 	for _, d in ipairs(model:GetDescendants()) do
 		if d:IsA("BasePart") then
-			local weld = Instance.new("WeldConstraint")
-			weld.Part0 = hitbox
-			weld.Part1 = d
-			weld.Parent = d
-			d.Anchored = false
+			table.insert(parts, d)
+			if d.Name == "Leg" then legs += 1 end
 		end
+	end
+
+	-- legs and arms swing from their top (hip, shoulder), a tail from where it meets the body
+	local arms, jointed = {}, {}
+	for _, p in ipairs(parts) do
+		local rel = hitbox.CFrame:PointToObjectSpace(p.Position)
+		local top = (p.CFrame * CFrame.new(0, p.Size.Y / 2, 0)).Position
+		local label = nil
+		if p.Name == "Leg" then
+			if legs >= 4 then
+				label = ((rel.X < 0) == (rel.Z < 0)) and "LegA" or "LegB" -- diagonal pairs, like a trot
+			else
+				label = rel.X < 0 and "LegL" or "LegR"
+			end
+			limbJoint(hitbox, p, label, top)
+		elseif p.Name == "Arm" then
+			label = rel.X < 0 and "ArmL" or "ArmR"
+			limbJoint(hitbox, p, label, top)
+			arms[label] = p
+		elseif p.Name == "Tail" then
+			label = "Tail"
+			limbJoint(hitbox, p, label, (p.CFrame * CFrame.new(0, 0, -p.Size.Z / 2)).Position)
+		end
+		jointed[p] = label ~= nil
+	end
+
+	-- everything else: hands and weapons go with the arm on their side, the rest with the body
+	for _, p in ipairs(parts) do
+		if not jointed[p] then
+			local holder = hitbox
+			if HELD[p.Name] then
+				local rel = hitbox.CFrame:PointToObjectSpace(p.Position)
+				holder = arms[rel.X < 0 and "ArmL" or "ArmR"] or hitbox
+			end
+			weld(holder, p)
+		end
+	end
+	for _, p in ipairs(parts) do
+		p.Anchored = false
 	end
 	model.Parent = hitbox
 end

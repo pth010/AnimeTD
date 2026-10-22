@@ -1,19 +1,34 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: ResultsUI
+-- (replaces the earlier version: after a Damage Challenge it says TIME'S UP! (or NEW BEST!)
+--  with the damage you dealt and your best score)
 -- The end-of-match screen (victory or defeat). Shows the waves reached, the rewards you
 -- earned and a damage summary for every player in the match, with two buttons:
 --   PLAY AGAIN       - the team replays once everyone left on the screen has picked it
 --   RETURN TO LOBBY  - go back to the lobby straight away
 -- After 30 seconds, players who picked Play Again replay and everyone else returns to the lobby.
--- (replaces the earlier version: no longer breaks if the camera isn't ready when it starts,
---  and prints "[ResultsUI]" lines in the Output so problems are easy to spot)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local resultsEvent = ReplicatedStorage:WaitForChild("ResultsEvent")
+-- The reward icons are a nice-to-have: the results screen must show even if CurrencyIcons is
+-- missing or broken, so load it carefully
+local CurrencyIcons = nil
+do
+	local module = ReplicatedStorage:WaitForChild("CurrencyIcons", 5)
+	local ok, result = false, nil
+	if module then
+		ok, result = pcall(require, module)
+	end
+	if ok and type(result) == "table" and type(result.Make) == "function" then
+		CurrencyIcons = result
+	else
+		warn("[ResultsUI] CurrencyIcons is missing or broken, so rewards show without icons.")
+	end
+end
 local player = Players.LocalPlayer
 
 local WIDTH, HEIGHT = 580, 500
@@ -23,6 +38,7 @@ local PANEL_LIGHT = Color3.fromRGB(34, 31, 56)
 local SUBTLE = Color3.fromRGB(185, 180, 215)
 local GOLD = Color3.fromRGB(255, 205, 70)
 local GEM = Color3.fromRGB(130, 220, 255)
+local SHARD = Color3.fromRGB(80, 230, 220) -- same as TraitData.ShardColor
 local WIN_COLOR = Color3.fromRGB(255, 205, 70)
 local LOSE_COLOR = Color3.fromRGB(235, 80, 80)
 
@@ -85,25 +101,12 @@ panelStroke.Parent = panel
 
 local uiScale = Instance.new("UIScale")
 uiScale.Parent = panel
--- Shrinks the window on small screens. The camera can be missing for a moment when the
--- game starts (or get swapped), so this never assumes it's there.
-local cameraConn
 local function fitToScreen()
-	local camera = workspace.CurrentCamera
-	if not camera then return end
-	local vp = camera.ViewportSize
-	uiScale.Scale = math.clamp(math.min((vp.X - 20) / WIDTH, (vp.Y - 20) / HEIGHT), 0.4, 1)
+	local vp = workspace.CurrentCamera.ViewportSize
+	uiScale.Scale = math.min(1, (vp.X - 20) / WIDTH, (vp.Y - 20) / HEIGHT)
 end
-local function watchCamera()
-	if cameraConn then cameraConn:Disconnect() end
-	local camera = workspace.CurrentCamera
-	if camera then
-		cameraConn = camera:GetPropertyChangedSignal("ViewportSize"):Connect(fitToScreen)
-	end
-	fitToScreen()
-end
-watchCamera()
-workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchCamera)
+fitToScreen()
+workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(fitToScreen)
 
 local title = label(panel, "", UDim2.fromOffset(0, 14), UDim2.new(1, 0, 0, 50), 44, WHITE, Enum.Font.GothamBlack)
 title.TextStrokeTransparency = 0.5
@@ -116,8 +119,33 @@ rewards.Size = UDim2.new(1, -40, 0, 44)
 rewards.BackgroundColor3 = PANEL_LIGHT
 rewards.Parent = panel
 corner(rewards, 10)
-local goldText = label(rewards, "", UDim2.fromScale(0, 0), UDim2.fromScale(0.5, 1), 22, GOLD, Enum.Font.GothamBlack)
-local gemsText = label(rewards, "", UDim2.fromScale(0.5, 0), UDim2.fromScale(0.5, 1), 22, GEM, Enum.Font.GothamBlack)
+-- One reward per third of the row: the currency's icon, then the amount, centered together
+local function rewardCell(index, kind, color)
+	local cell = Instance.new("Frame")
+	cell.Position = UDim2.fromScale((index - 1) / 3, 0)
+	cell.Size = UDim2.fromScale(1 / 3, 1)
+	cell.BackgroundTransparency = 1
+	cell.Parent = rewards
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.Padding = UDim.new(0, 6)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = cell
+	local icon = CurrencyIcons and CurrencyIcons.Make(kind, 28)
+	if icon then
+		icon.LayoutOrder = 1
+		icon.Parent = cell
+	end
+	local amount = label(cell, "", UDim2.new(), UDim2.fromOffset(0, 28), 20, color, Enum.Font.GothamBlack)
+	amount.AutomaticSize = Enum.AutomaticSize.X
+	amount.LayoutOrder = 2
+	return amount
+end
+local goldText = rewardCell(1, "Gold", GOLD)
+local gemsText = rewardCell(2, "Gems", GEM)
+local shardsText = rewardCell(3, "Shards", SHARD)
 
 -- Damage summary
 label(panel, "DAMAGE SUMMARY", UDim2.fromOffset(24, 152), UDim2.fromOffset(240, 20), 14, SUBTLE, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
@@ -231,12 +259,19 @@ local function show(data)
 
 	local color = data.Victory and WIN_COLOR or LOSE_COLOR
 	title.Text = data.Victory and "VICTORY!" or "DEFEAT"
+	subtitle.Text = string.format("Waves cleared: %d / %d", data.Victory and data.MaxWave or math.max(0, (data.Wave or 1) - 1), data.MaxWave or 0)
+	if data.Challenge then
+		-- a Damage Challenge: your score and your best (on the leaderboard in the lobby)
+		color = Color3.fromRGB(255, 205, 70)
+		title.Text = data.NewBest and "NEW BEST!" or "TIME'S UP!"
+		subtitle.Text = string.format("Damage dealt: %s   -   Your best: %s", commas(data.Score or 0), commas(data.Best or data.Score or 0))
+	end
 	title.TextColor3 = color
 	panelStroke.Color = color
-	subtitle.Text = string.format("Waves cleared: %d / %d", data.Victory and data.MaxWave or math.max(0, (data.Wave or 1) - 1), data.MaxWave or 0)
 
 	goldText.Text = (data.Gold or 0) > 0 and ("+" .. commas(data.Gold) .. " Gold") or "+0 Gold"
 	gemsText.Text = "+" .. commas(data.Gems or 0) .. " Gems"
+	shardsText.Text = "+" .. commas(data.Shards or 0) .. " Shards"
 
 	for _, c in ipairs(list:GetChildren()) do
 		if c:IsA("Frame") then c:Destroy() end
@@ -262,17 +297,16 @@ resultsEvent.OnClientEvent:Connect(function(data)
 	if type(data) ~= "table" then return end
 	if data.Hide then
 		hide()
-	else
-		print("[ResultsUI] showing the", data.Victory and "victory" or "defeat", "screen")
-		fitToScreen()
-		local ok, err = pcall(show, data)
-		if not ok then
-			warn("[ResultsUI] couldn't fill in the results screen:", err)
-			gui.Enabled = true -- still show it, so you can press the buttons
-		end
+		return
+	end
+	print("[ResultsUI] Results arrived:", data.Victory and "victory" or "defeat")
+	local ok, err = pcall(show, data)
+	if not ok then
+		-- something in the details broke: still show the screen so the buttons work
+		warn("[ResultsUI] Couldn't fill in the results screen:", err)
+		gui.Enabled = true
 	end
 end)
-print("[ResultsUI] ready")
 
 againButton.Activated:Connect(function()
 	if votedAgain or not gui.Enabled then return end

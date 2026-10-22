@@ -1,6 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: AdminCommands
+-- (replaces the earlier version: the admin list moved to PlaceConfig.Admins, where the game
+--  pass checks can see it too)
 -- Tester chat commands. Type these in the in-game chat box (not the Studio command bar):
 --   !gems 5000              add 5000 gems (summon currency, saved)
 --   !setgems 5000           set your gems to exactly 5000
@@ -8,18 +10,21 @@
 --   !setcash 5000           set your in-match cash to exactly 5000
 --   !gold 5000              add 5000 gold (main-game currency, saved)
 --   !setgold 5000           set your gold to exactly 5000
+--   !shards 20              add 20 Trait Shards (Traits Cave currency, saved)
+--   !setshards 20           set your Trait Shards to exactly 20
 --   !resetpity              set your summon pity back to 0
 --   !unit Starfall Kitsune  give yourself one copy of a unit
 --   !unit frost mage 3      give yourself 3 copies (names aren't case-sensitive,
 --                           and the start of a name is enough: "!unit starfall")
---   !trait blade novice lord  put a trait on a unit you own ("!trait blade novice none" removes it)
---   !xp frost mage 5000     give a unit you own fusion XP (levels it up)
---   !stars frost mage 3     set a unit's evolution stars (0-3)
--- Negative numbers work for gems, gold and cash (e.g. "!gems -500").
+--   !trait blade novice lord  put a trait on your best copy of a unit ("... none" removes it)
+--   !xp frost mage 5000     give your best copy of a unit fusion XP (levels it up)
+--   !stars frost mage 3     set your best copy's evolution stars (0-3)
+--   !slots 50               add 50 saved inventory slots (negative removes them)
+-- Negative numbers work for gems, gold, shards and cash (e.g. "!gems -500").
 -- Results and mistakes are printed in the Output window.
 --
 -- Who can use them: everyone while testing in Studio, and in the live game only the
--- UserIds listed in ADMINS below. Find your UserId in the URL of your Roblox profile page.
+-- UserIds listed in PlaceConfig.Admins. Find your UserId in the URL of your Roblox profile page.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -29,15 +34,12 @@ local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
 local ProgressData = require(ReplicatedStorage:WaitForChild("ProgressData"))
 local PlayerData = require(ServerScriptService:WaitForChild("PlayerData"))
-
-local ADMINS = {
-	[554749540] = true,
-}
+local PlaceConfig = require(ReplicatedStorage:WaitForChild("PlaceConfig"))
 
 local MAX_UNIT_COPIES = 100 -- most copies one !unit command can give
 
 local function isAdmin(player)
-	return RunService:IsStudio() or ADMINS[player.UserId] == true
+	return RunService:IsStudio() or PlaceConfig.IsAdmin(player)
 end
 
 -- Finds a unit by name: an exact match first (any capitalisation), then a name that
@@ -105,6 +107,26 @@ function commands.setgold(player, args)
 	PlayerData.AddGold(player, amount - profile.Gold)
 end
 
+function commands.shards(player, args)
+	local amount = readNumber(args)
+	if not amount then return "usage: !shards <number>" end
+	PlayerData.AddShards(player, amount)
+end
+
+function commands.setshards(player, args)
+	local amount = readNumber(args)
+	if not amount then return "usage: !setshards <number>" end
+	local profile = PlayerData.Get(player)
+	if not profile then return "your data is still loading" end
+	PlayerData.AddShards(player, amount - profile.Shards)
+end
+
+function commands.slots(player, args)
+	local amount = readNumber(args)
+	if not amount then return "usage: !slots <number>" end
+	PlayerData.AddBonusSlots(player, amount)
+end
+
 function commands.cash(player, args)
 	local amount = readNumber(args)
 	if not amount then return "usage: !cash <number>" end
@@ -139,10 +161,8 @@ function commands.unit(player, args)
 	local profile = PlayerData.Get(player)
 	if not profile then return "your data is still loading" end
 
-	-- Added directly (not through PlayerData.AddUnit) so auto-delete can't eat it
-	profile.Obtained[unitName] = (profile.Obtained[unitName] or 0) + count
-	profile.Units[unitName] = (profile.Units[unitName] or 0) + count
-	PlayerData.Refresh(player)
+	-- Added directly (not through PlayerData.AddUnit) so auto-delete and slots can't stop it
+	PlayerData.GiveUnits(player, unitName, count)
 	print(string.format("[AdminCommands] gave %s %d x %s", player.Name, count, unitName))
 end
 
@@ -167,7 +187,11 @@ function commands.trait(player, args)
 
 	local unitName, problem = findUnit(unitPart)
 	if not unitName then return problem end
-	local ok, err = PlayerData.SetTrait(player, unitName, traitName)
+	local profile = PlayerData.Get(player)
+	if not profile then return "your data is still loading" end
+	local unit = PlayerData.BestCopy(profile, unitName)
+	if not unit then return "you don't own " .. unitName end
+	local ok, err = PlayerData.SetTrait(player, unit, traitName)
 	if not ok then return err end
 	print(string.format("[AdminCommands] %s's %s now has trait %s", player.Name, unitName, traitName or "none"))
 end
@@ -185,8 +209,9 @@ function commands.xp(player, args)
 	if not unitName then return problem or "usage: !xp <unit> <amount>" end
 	local profile = PlayerData.Get(player)
 	if not profile then return "your data is still loading" end
-	if not profile.Units[unitName] then return "you don't own " .. unitName end
-	profile.XP[unitName] = math.min((profile.XP[unitName] or 0) + amount, ProgressData.MaxXP())
+	local unit = PlayerData.BestCopy(profile, unitName)
+	if not unit then return "you don't own " .. unitName end
+	unit.XP = math.min(unit.XP + amount, ProgressData.MaxXP())
 	PlayerData.Refresh(player)
 end
 
@@ -195,8 +220,9 @@ function commands.stars(player, args)
 	if not unitName then return problem or "usage: !stars <unit> <0-3>" end
 	local profile = PlayerData.Get(player)
 	if not profile then return "your data is still loading" end
-	if not profile.Units[unitName] then return "you don't own " .. unitName end
-	profile.Stars[unitName] = math.clamp(stars, 0, ProgressData.MaxStars)
+	local unit = PlayerData.BestCopy(profile, unitName)
+	if not unit then return "you don't own " .. unitName end
+	unit.Stars = math.clamp(stars, 0, ProgressData.MaxStars)
 	PlayerData.Refresh(player)
 end
 

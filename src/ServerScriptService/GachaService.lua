@@ -1,7 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: GachaService
--- (replaces the earlier version: adds the limited event banner with a rate-up featured unit)
+-- (replaces the earlier version: no summoning during a match or while teleporting to one)
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -79,10 +79,21 @@ summonRemote.OnServerInvoke = function(player, count)
 	if count ~= 1 and count ~= 10 then
 		return { Success = false, Error = "Invalid summon." }
 	end
+	if player:GetAttribute("InMatch") or player:GetAttribute("Teleporting") then
+		return { Success = false, Error = "Not right now." }
+	end
 
 	local cost = (count == 10) and TEN_COST or SINGLE_COST
 	if profile.Gems < cost then
 		return { Success = false, Error = "Not enough gems." }
+	end
+	local free = PlayerData.FreeSlots(profile)
+	if free < count then
+		if free <= 0 then
+			return { Success = false, Error = string.format("Your inventory is full (%d/%d). Fuse or delete units, or get more slots.",
+				PlayerData.UnitCount(profile), PlayerData.MaxSlots(profile)) }
+		end
+		return { Success = false, Error = string.format("A x%d summon needs %d free slots (you have %d).", count, count, free) }
 	end
 
 	profile.Busy = true

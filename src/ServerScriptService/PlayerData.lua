@@ -1,9 +1,17 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: ModuleScript
 -- NAME: PlayerData
--- (replaces the earlier version: adds unit levels from fusing, and evolution stars)
+-- (replaces the earlier version: admins (PlaceConfig.Admins) get the slots from every slot
+--  pass without buying them)
+-- Session lock for the lobby <-> match server teleports: a server marks a player's save as
+-- "in use" while they're on it, and lets go of it (PlayerData.Release) when they leave or
+-- teleport. A server that loads a player still marked as in use by another server waits up
+-- to 20 seconds for it to let go, and a server that has lost a player to another server never
+-- saves over them again. So rewards earned in a match can't be overwritten by a late save
+-- from the lobby, or the other way round.
 --
--- Single source of truth for each player's gems, gold, pity, units, locks, team and settings.
+-- Single source of truth for each player's gems, gold, trait shards, pity, units, locks,
+-- team and settings.
 -- Saving needs a published place (File > Publish to Roblox). To test in Studio, also enable
 --   Game Settings > Security > "Enable Studio Access to API Services".
 -- If loading fails, the player still plays but that session will NOT save,
@@ -12,16 +20,25 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DataStoreService = game:GetService("DataStoreService")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
 local ProgressData = require(ReplicatedStorage:WaitForChild("ProgressData"))
+local PlaceConfig = require(ReplicatedStorage:WaitForChild("PlaceConfig"))
 
 local STORE_NAME = "AnimeTD_PlayerData_v1" -- bump the version to wipe everyone's data
+local SAVE_VERSION = 2 -- 1 = units stacked by name, 2 = one entry per unit
 local AUTOSAVE_INTERVAL = 120
 local SAVE_DELAY = 5 -- seconds after a change before it is written
 local STARTING_GEMS = 1000
 local STARTING_GOLD = 0
+local STARTING_SHARDS = 3 -- enough for a few trait summons in the Traits Cave
+
+-- Session lock (see the top). A server refreshes its mark on every save (autosave included),
+-- so a mark older than LOCK_TIMEOUT belongs to a server that crashed.
+local LOCK_TIMEOUT = 300 -- seconds
+local LOCK_WAIT = 20     -- the longest a server waits for another one to let go of a player
 
 -- Units every NEW player starts with. Empty = the inventory starts empty.
 -- Example: { ["Blade Novice"] = 1 }
@@ -40,69 +57,162 @@ end
 local PlayerData = {}
 PlayerData.Profiles = {}
 
--- Profile layout:
---   Units      [name] = copies you currently own
---   Obtained   [name] = total copies ever received   (only ever goes up)
---   Deleted    [name] = total copies ever deleted    (only ever goes up, includes auto-deletes)
---   Locked     [name] = true  (locked units can't be deleted or auto-deleted)
---   Equipped   = ordered list of unit names on your team (max UnitData.TeamSize)
---   AutoEquip  = true: the team is always your best units by damage per second
---   AutoDelete [rarityName] = true: newly summoned units of that rarity are deleted on arrival
---   Cleared    [levelId] = true: levels this player has beaten (see LevelData)
---   Traits     [name] = trait name (see TraitData), one per unit you own
---   XP         [name] = fusion XP (sets the unit's level, see ProgressData)
---   Stars      [name] = evolution stars (0 to ProgressData.MaxStars)
--- Units = Obtained - Deleted. Keeping both running totals lets two servers merge
--- their saves safely: taking the higher of each total can never resurrect a deleted
--- unit or lose a new one.
+-- The screen elements players can move in the Screen Layout panel, and how far they can go
+PlayerData.LayoutElements = { TeamBar = true, InventoryButton = true, Currency = true }
+local LAYOUT_MOVE_LIMIT = 0.5          -- up to half a screen in any direction
+local LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX = 0.6, 1.6
 
-local function cleanCounts(t)
+-- On/off settings from the Settings popup, and what they are for a new player
+-- Every player starts each visit with these (switching one off only lasts until they leave).
+PlayerData.SettingDefaults = {
+	TraitIcons = true, -- trait icons over placed units
+	HealthBars = true, -- health bars over enemies
+	HPNumbers = true,  -- the HP number written on those health bars
+}
+
+local function cleanSettings(t)
 	local out = {}
-	if type(t) ~= "table" then return out end
-	for name, n in pairs(t) do
-		n = tonumber(n)
-		if UnitData.UnitRarity[name] and n and n > 0 then
-			out[name] = math.floor(n)
+	for name, default in pairs(PlayerData.SettingDefaults) do
+		-- (careful: `type(t) == "table" and t[name]` would give false when t is missing,
+		-- which looks like a real "off" and wiped out the defaults)
+		local v = nil
+		if type(t) == "table" then
+			v = t[name]
+		end
+		if type(v) == "boolean" then
+			out[name] = v
+		else
+			out[name] = default
 		end
 	end
 	return out
 end
 
+local function cleanLayout(t)
+	local out = {}
+	if type(t) ~= "table" then return out end
+	for key, v in pairs(t) do
+		if PlayerData.LayoutElements[key] and type(v) == "table" then
+			local x, y, s = tonumber(v.X), tonumber(v.Y), tonumber(v.S)
+			if x and y and s then
+				out[key] = {
+					X = math.clamp(x, -LAYOUT_MOVE_LIMIT, LAYOUT_MOVE_LIMIT),
+					Y = math.clamp(y, -LAYOUT_MOVE_LIMIT, LAYOUT_MOVE_LIMIT),
+					S = math.clamp(s, LAYOUT_SIZE_MIN, LAYOUT_SIZE_MAX),
+				}
+			end
+		end
+	end
+	return out
+end
+
+-- Profile layout:
+--   Units      [id] = { Id, Name, Trait, XP, Stars, Locked }   one entry per unit you own
+--   NextId     the id the next new unit gets
+--   Equipped   = ordered list of unit ids on your team (max UnitData.TeamSize, one per name)
+--   AutoEquip  = true: the team is always your best units by damage per second
+--   AutoDelete [rarityName] = true: newly summoned units of that rarity are deleted on arrival
+--   Cleared    [levelId] = true: levels this player has beaten (see LevelData)
+--   BonusSlots extra inventory slots from rewards (saved; game pass slots are checked on join)
+--   PassSlots  slots from owned game passes (not saved, see UnitData.SlotPasses)
+--   UILayout   [element] = { X, Y, S }: how far each screen element is moved (fractions of
+--              the screen) and its size, set in the Screen Layout panel (see LayoutUI)
+--   Settings   [name] = true/false from the Settings popup (see PlayerData.SettingDefaults)
+
+-- ===== Units =====
+local function newUnit(profile, unitName)
+	local id = profile.NextId
+	profile.NextId += 1
+	local unit = { Id = id, Name = unitName, Trait = nil, XP = 0, Stars = 0, Locked = false }
+	profile.Units[id] = unit
+	return unit
+end
+
+function PlayerData.UnitCount(profile)
+	local n = 0
+	for _ in pairs(profile.Units) do
+		n += 1
+	end
+	return n
+end
+
+function PlayerData.MaxSlots(profile)
+	return UnitData.BaseSlots + (profile.BonusSlots or 0) + (profile.PassSlots or 0)
+end
+
+function PlayerData.FreeSlots(profile)
+	return PlayerData.MaxSlots(profile) - PlayerData.UnitCount(profile)
+end
+
+-- The unit with this id, if the player owns it (ids arrive from clients as numbers)
+function PlayerData.FindUnit(profile, id)
+	return typeof(id) == "number" and profile.Units[id] or nil
+end
+
+-- The copy of `unitName` on the player's team (what gets placed in a match)
+function PlayerData.EquippedUnit(profile, unitName)
+	for _, id in ipairs(profile.Equipped) do
+		local u = profile.Units[id]
+		if u and u.Name == unitName then
+			return u
+		end
+	end
+	return nil
+end
+
+-- The player's strongest copy of a unit: the equipped one, else the highest level (tester commands)
+function PlayerData.BestCopy(profile, unitName)
+	local best = PlayerData.EquippedUnit(profile, unitName)
+	if best then return best end
+	for _, u in pairs(profile.Units) do
+		if u.Name == unitName and (not best or u.XP + u.Stars * 1e6 > best.XP + best.Stars * 1e6) then
+			best = u
+		end
+	end
+	return best
+end
+
 -- ===== Team helpers =====
 -- How auto-equip ranks units: cash units first (they never attack, so damage can't
 -- rank them), then everything else by damage per second
-local function dps(profile, unitName)
-	if UnitData.IsFarm(unitName) then
+local function dps(unit)
+	if UnitData.IsFarm(unit.Name) then
 		return math.huge
 	end
-	local s = ProgressData.Apply(TraitData.StatsFor(unitName, profile.Traits[unitName]),
-		profile.XP[unitName], profile.Stars[unitName])
+	local s = ProgressData.Apply(TraitData.StatsFor(unit.Name, unit.Trait), unit.XP, unit.Stars)
 	return s.Damage / s.Cooldown
 end
 
 local function autoEquipBest(profile)
-	local names = {}
-	for name in pairs(profile.Units) do
-		table.insert(names, name)
+	local units = {}
+	for _, u in pairs(profile.Units) do
+		table.insert(units, { Unit = u, Score = dps(u) })
 	end
-	table.sort(names, function(a, b)
-		local da, db = dps(profile, a), dps(profile, b)
-		if da ~= db then return da > db end
-		return a < b
+	table.sort(units, function(a, b)
+		if a.Score ~= b.Score then return a.Score > b.Score end
+		if a.Unit.Name ~= b.Unit.Name then return a.Unit.Name < b.Unit.Name end
+		return a.Unit.Id < b.Unit.Id
 	end)
 
+	-- the best copy of each different unit, until the team is full
 	profile.Equipped = {}
-	for i = 1, math.min(#names, UnitData.TeamSize) do
-		profile.Equipped[i] = names[i]
+	local names = {}
+	for _, entry in ipairs(units) do
+		if #profile.Equipped >= UnitData.TeamSize then break end
+		if not names[entry.Unit.Name] then
+			names[entry.Unit.Name] = true
+			table.insert(profile.Equipped, entry.Unit.Id)
+		end
 	end
 end
 
 local function pruneEquipped(profile)
-	local kept, seen = {}, {}
-	for _, name in ipairs(profile.Equipped) do
-		if profile.Units[name] and not seen[name] and #kept < UnitData.TeamSize then
-			table.insert(kept, name)
-			seen[name] = true
+	local kept, names = {}, {}
+	for _, id in ipairs(profile.Equipped) do
+		local u = profile.Units[id]
+		if u and not names[u.Name] and #kept < UnitData.TeamSize then
+			table.insert(kept, id)
+			names[u.Name] = true
 		end
 	end
 	profile.Equipped = kept
@@ -127,115 +237,262 @@ function PlayerData.Sync(player)
 
 	player:SetAttribute("Gems", profile.Gems)
 	player:SetAttribute("Gold", profile.Gold)
+	player:SetAttribute("Shards", profile.Shards)
 	player:SetAttribute("Pity", profile.Pity)
+	player:SetAttribute("MaxSlots", PlayerData.MaxSlots(profile))
 
-	local counts, locks = {}, {}
-	for name, count in pairs(profile.Units) do
-		table.insert(counts, name .. "=" .. count)
-		if profile.Locked[name] then
-			table.insert(locks, name)
+	-- every unit: "id|name|trait|xp|stars|locked" (read with UnitData.ParseUnits)
+	local ids = {}
+	for id in pairs(profile.Units) do
+		table.insert(ids, id)
+	end
+	table.sort(ids)
+	local entries = {}
+	for _, id in ipairs(ids) do
+		local u = profile.Units[id]
+		table.insert(entries, string.format("%d|%s|%s|%d|%d|%d", u.Id, u.Name, u.Trait or "", u.XP, u.Stars, u.Locked and 1 or 0))
+	end
+	player:SetAttribute("Units", table.concat(entries, ";"))
+
+	-- the team, as ids (Inventory) and as names (match hotbar), plus the team's traits and
+	-- progress by name, which is what the match hotbar shows
+	local teamIds, teamNames, teamTraits, teamProgress = {}, {}, {}, {}
+	for _, id in ipairs(profile.Equipped) do
+		local u = profile.Units[id]
+		if u then
+			table.insert(teamIds, tostring(id))
+			table.insert(teamNames, u.Name)
+			if u.Trait then
+				table.insert(teamTraits, u.Name .. "=" .. u.Trait)
+			end
+			table.insert(teamProgress, string.format("%s=%d:%d", u.Name, u.XP, u.Stars))
 		end
 	end
-	table.sort(counts)
-	table.sort(locks)
+	player:SetAttribute("EquippedIds", table.concat(teamIds, ","))       -- "12,4,31"
+	player:SetAttribute("Equipped", table.concat(teamNames, ","))       -- "Frost Mage,Blade Novice"
+	player:SetAttribute("UnitTraits", table.concat(teamTraits, ";"))    -- "Frost Mage=Swift"
+	player:SetAttribute("UnitProgress", table.concat(teamProgress, ";")) -- "Frost Mage=1200:2"
+	player:SetAttribute("AutoEquip", profile.AutoEquip)
 
 	local autoDelete = {}
 	for rarityName in pairs(profile.AutoDelete) do
 		table.insert(autoDelete, rarityName)
 	end
 	table.sort(autoDelete)
-
-	player:SetAttribute("UnitCounts", table.concat(counts, ";"))        -- "Blade Novice=2;Ember Archer=1"
-	player:SetAttribute("UnitLocks", table.concat(locks, ";"))          -- "Blade Novice;Frost Mage"
-	player:SetAttribute("Equipped", table.concat(profile.Equipped, ",")) -- the match hotbar
-	player:SetAttribute("AutoEquip", profile.AutoEquip)
-	player:SetAttribute("AutoDelete", table.concat(autoDelete, ","))    -- "Common,Rare"
+	player:SetAttribute("AutoDelete", table.concat(autoDelete, ",")) -- "Common,Rare"
 
 	local cleared = {}
 	for id in pairs(profile.Cleared) do
 		table.insert(cleared, id)
 	end
 	table.sort(cleared)
-	player:SetAttribute("ClearedLevels", table.concat(cleared, ","))    -- "1,2"
+	player:SetAttribute("ClearedLevels", table.concat(cleared, ",")) -- "1,2"
 
-	local traits = {}
-	for name, trait in pairs(profile.Traits) do
-		if profile.Units[name] then
-			table.insert(traits, name .. "=" .. trait)
-		end
+	local layout = {}
+	for key, v in pairs(profile.UILayout) do
+		table.insert(layout, string.format("%s=%.4f:%.4f:%.4f", key, v.X, v.Y, v.S))
 	end
-	table.sort(traits)
-	player:SetAttribute("UnitTraits", table.concat(traits, ";"))        -- "Blade Novice=Lord;Frost Mage=Swift"
+	table.sort(layout)
+	player:SetAttribute("UILayout", table.concat(layout, ";")) -- "TeamBar=0.1000:-0.0500:1.2000"
 
-	local progress = {}
-	for name in pairs(profile.Units) do
-		local xp, stars = profile.XP[name] or 0, profile.Stars[name] or 0
-		if xp > 0 or stars > 0 then
-			table.insert(progress, string.format("%s=%d:%d", name, xp, stars))
-		end
+	local settings = {}
+	for name, on in pairs(profile.Settings) do
+		table.insert(settings, name .. "=" .. (on and 1 or 0))
 	end
-	table.sort(progress)
-	player:SetAttribute("UnitProgress", table.concat(progress, ";"))    -- "Frost Mage=1200:2" (XP:stars)
+	table.sort(settings)
+	player:SetAttribute("Settings", table.concat(settings, ";")) -- "HPNumbers=1;HealthBars=1;TraitIcons=0"
 end
 
+-- ===== Loading =====
+-- Is this save marked as in use by another server that's still running?
+local function lockedByOther(saved)
+	local session = type(saved) == "table" and saved.Session
+	return type(session) == "table" and session.Job ~= game.JobId and tonumber(session.Time) ~= nil
+		and os.time() - session.Time < LOCK_TIMEOUT
+end
+
+-- Loads a player's save and marks it as in use by this server. If another server still has
+-- it (they just teleported here and it's finishing their save), waits for it to let go.
 local function loadFromStore(userId)
 	if not store then
 		return false, nil
 	end
-	for _ = 1, 3 do
-		local ok, result = pcall(function()
-			return store:GetAsync("Player_" .. userId)
+	local giveUpAt = os.clock() + LOCK_WAIT
+	local failures = 0
+	while true do
+		local saved, waiting = nil, false
+		local ok, err = pcall(function()
+			store:UpdateAsync("Player_" .. userId, function(old)
+				saved = old
+				waiting = lockedByOther(old) and os.clock() < giveUpAt
+				if waiting then
+					return nil -- not ours yet: change nothing
+				end
+				local new = type(old) == "table" and table.clone(old) or {}
+				new.Session = { Job = game.JobId, Time = os.time() }
+				return new
+			end)
 		end)
-		if ok then
-			return true, result
+		if ok and not waiting then
+			return true, saved
+		elseif ok then
+			task.wait(2) -- the other server is still saving
+		else
+			failures += 1
+			warn("[PlayerData] load failed:", err)
+			if failures >= 3 then
+				return false, nil
+			end
+			task.wait(1)
 		end
-		warn("[PlayerData] load failed:", result)
-		task.wait(1)
 	end
-	return false, nil
+end
+
+-- Lets go of a player's save without changing anything else (they left while it was loading)
+local function unlock(userId)
+	pcall(function()
+		store:UpdateAsync("Player_" .. userId, function(old)
+			if type(old) ~= "table" or type(old.Session) ~= "table" or old.Session.Job ~= game.JobId then
+				return nil
+			end
+			local new = table.clone(old)
+			new.Session = nil
+			return new
+		end)
+	end)
+end
+
+local function cleanNumber(v, min, max)
+	v = tonumber(v)
+	if not v then return nil end
+	return math.clamp(math.floor(v), min, max)
+end
+
+-- Version 2 saves: Units = { { I = id, N = name, T = trait, X = xp, S = stars, L = locked }, ... }
+local function loadUnitsV2(profile, saved)
+	local maxId = 0
+	for _, e in ipairs(saved.Units) do
+		local id = type(e) == "table" and cleanNumber(e.I, 1, 1e12)
+		if id and UnitData.UnitRarity[e.N] and not profile.Units[id] then
+			profile.Units[id] = {
+				Id = id,
+				Name = e.N,
+				Trait = TraitData.Get(e.T) and e.T or nil,
+				XP = cleanNumber(e.X, 0, ProgressData.MaxXP()) or 0,
+				Stars = cleanNumber(e.S, 0, ProgressData.MaxStars) or 0,
+				Locked = e.L == true,
+			}
+			maxId = math.max(maxId, id)
+		end
+	end
+	profile.NextId = math.max(cleanNumber(saved.NextId, 1, 1e12) or 1, maxId + 1)
+	if type(saved.Equipped) == "table" then
+		for _, id in ipairs(saved.Equipped) do
+			if profile.Units[tonumber(id)] then
+				table.insert(profile.Equipped, tonumber(id))
+			end
+		end
+	end
+end
+
+-- Version 1 saves stacked units by name: Units[name] = copies, with one trait / XP / stars
+-- per name. Each copy becomes its own unit; the first copy keeps the trait, XP and stars.
+local function loadUnitsV1(profile, saved)
+	local firstOf = {}
+	local names = {}
+	for name in pairs(saved.Units) do
+		table.insert(names, name)
+	end
+	table.sort(names)
+	for _, name in ipairs(names) do
+		local copies = cleanNumber(saved.Units[name], 0, 10000)
+		if UnitData.UnitRarity[name] and copies and copies > 0 then
+			local locked = type(saved.Locked) == "table" and saved.Locked[name] == true
+			for i = 1, copies do
+				local u = newUnit(profile, name)
+				u.Locked = locked
+				if i == 1 then
+					firstOf[name] = u
+					local trait = type(saved.Traits) == "table" and saved.Traits[name]
+					u.Trait = TraitData.Get(trait) and trait or nil
+					u.XP = type(saved.XP) == "table" and cleanNumber(saved.XP[name], 0, ProgressData.MaxXP()) or 0
+					u.Stars = type(saved.Stars) == "table" and cleanNumber(saved.Stars[name], 0, ProgressData.MaxStars) or 0
+				end
+			end
+		end
+	end
+	if type(saved.Equipped) == "table" then
+		for _, name in ipairs(saved.Equipped) do
+			local u = firstOf[name]
+			if u then
+				table.insert(profile.Equipped, u.Id)
+			end
+		end
+	end
+end
+
+-- Counts the slots from slot game passes the player owns (admins have them all)
+local function checkSlotPasses(player, profile)
+	local slots = 0
+	local admin = PlaceConfig.IsAdmin(player)
+	for _, pass in ipairs(UnitData.SlotPasses) do
+		if admin then
+			slots += pass.Slots
+		elseif pass.Id and pass.Id ~= 0 then
+			local ok, owns = pcall(function()
+				return MarketplaceService:UserOwnsGamePassAsync(player.UserId, pass.Id)
+			end)
+			if ok and owns then
+				slots += pass.Slots
+			end
+		end
+	end
+	profile.PassSlots = slots
 end
 
 function PlayerData.Load(player)
 	local ok, saved = loadFromStore(player.UserId)
-	if not player.Parent then return end -- left while loading
+	if not player.Parent then -- left while loading
+		if ok then unlock(player.UserId) end
+		return
+	end
 
 	local profile = {
 		Gems = STARTING_GEMS,
 		Gold = STARTING_GOLD,
+		Shards = STARTING_SHARDS,
 		Pity = 0,
-		Units = cleanCounts(STARTING_UNITS),
-		Obtained = cleanCounts(STARTING_UNITS),
-		Deleted = {},
-		Locked = {},
+		Units = {},
+		NextId = 1,
 		Equipped = {},
 		AutoEquip = true,
 		AutoDelete = {},
 		Cleared = {},
-		Traits = {},
-		XP = {},
-		Stars = {},
+		BonusSlots = 0,
+		PassSlots = 0,
+		UILayout = {},
+		Settings = cleanSettings(nil),
 		Busy = false,
 		SavePending = false,
 		CanSave = ok, -- never save over a profile we failed to load
+		Released = false, -- true once this server has let go of the player (see Release)
 	}
 
-	if ok and type(saved) == "table" then
+	if ok and type(saved) == "table" and saved.Gems ~= nil then
 		profile.Gems = tonumber(saved.Gems) or STARTING_GEMS
 		profile.Gold = tonumber(saved.Gold) or STARTING_GOLD
+		profile.Shards = tonumber(saved.Shards) or STARTING_SHARDS
 		profile.Pity = tonumber(saved.Pity) or 0
+		profile.BonusSlots = cleanNumber(saved.BonusSlots, 0, 100000) or 0
+		profile.UILayout = cleanLayout(saved.UILayout)
+		-- the Settings popup's switches start on every time you join (saved choices aren't loaded)
+		profile.Settings = cleanSettings(nil)
 
 		if type(saved.Units) == "table" then
-			profile.Units = cleanCounts(saved.Units) -- may be empty, that's valid
-			-- Older saves have no running totals: treat what they owned as "obtained"
-			profile.Obtained = type(saved.Obtained) == "table" and cleanCounts(saved.Obtained) or cleanCounts(saved.Units)
-			profile.Deleted = cleanCounts(saved.Deleted)
-		end
-
-		if type(saved.Locked) == "table" then
-			for name, v in pairs(saved.Locked) do
-				if v == true and profile.Units[name] then
-					profile.Locked[name] = true
-				end
+			if saved.Version == SAVE_VERSION then
+				loadUnitsV2(profile, saved)
+			else
+				loadUnitsV1(profile, saved)
 			end
 		end
 
@@ -249,13 +506,6 @@ function PlayerData.Load(player)
 				end
 			end
 		end
-		if type(saved.Equipped) == "table" then
-			for _, name in ipairs(saved.Equipped) do
-				if type(name) == "string" then
-					table.insert(profile.Equipped, name)
-				end
-			end
-		end
 		if type(saved.Cleared) == "table" then
 			for _, id in ipairs(saved.Cleared) do
 				if tonumber(id) then
@@ -263,82 +513,49 @@ function PlayerData.Load(player)
 				end
 			end
 		end
-		if type(saved.Traits) == "table" then
-			for name, trait in pairs(saved.Traits) do
-				if profile.Units[name] and TraitData.Get(trait) then
-					profile.Traits[name] = trait
-				end
-			end
-		end
-		if type(saved.XP) == "table" then
-			for name, xp in pairs(saved.XP) do
-				if profile.Units[name] and tonumber(xp) then
-					profile.XP[name] = math.clamp(math.floor(tonumber(xp)), 0, ProgressData.MaxXP())
-				end
-			end
-		end
-		if type(saved.Stars) == "table" then
-			for name, stars in pairs(saved.Stars) do
-				if profile.Units[name] and tonumber(stars) then
-					profile.Stars[name] = math.clamp(math.floor(tonumber(stars)), 0, ProgressData.MaxStars)
+	elseif ok then
+		-- a brand new player
+		for name, copies in pairs(STARTING_UNITS) do
+			if UnitData.UnitRarity[name] then
+				for _ = 1, copies do
+					newUnit(profile, name)
 				end
 			end
 		end
 	end
 
+	checkSlotPasses(player, profile)
+	if not player.Parent then
+		if ok then unlock(player.UserId) end
+		return
+	end
 	normalizeEquipment(profile)
 	PlayerData.Profiles[player] = profile
 	PlayerData.Sync(player)
 end
 
-function PlayerData.Save(player)
+-- ===== Saving =====
+-- release = true lets go of the player's save (they're leaving or teleporting)
+function PlayerData.Save(player, release)
 	local profile = PlayerData.Profiles[player]
 	if not store or not profile or not profile.CanSave then return end
 
+	local units = {}
+	for _, u in pairs(profile.Units) do
+		table.insert(units, { I = u.Id, N = u.Name, T = u.Trait, X = u.XP, S = u.Stars, L = u.Locked or nil })
+	end
+	table.sort(units, function(a, b) return a.I < b.I end)
+
 	local key = "Player_" .. player.UserId
+	local lost = false
 	local ok, err = pcall(function()
 		store:UpdateAsync(key, function(old)
-			local obtained = table.clone(profile.Obtained)
-			local deleted = table.clone(profile.Deleted)
-
-			-- Merge with whatever another server may have saved: higher running total wins
-			if type(old) == "table" then
-				local oldObtained = type(old.Obtained) == "table" and old.Obtained or old.Units
-				for name, n in pairs(cleanCounts(oldObtained)) do
-					if (obtained[name] or 0) < n then obtained[name] = n end
-				end
-				for name, n in pairs(cleanCounts(old.Deleted)) do
-					if (deleted[name] or 0) < n then deleted[name] = n end
-				end
+			-- another server took this player over: never write over what it saved
+			lost = type(old) == "table" and type(old.Session) == "table" and old.Session.Job ~= game.JobId
+			if lost then
+				return nil
 			end
-
-			local units, locked, traits, xpOut, starsOut = {}, {}, {}, {}, {}
-			local oldXP = type(old) == "table" and type(old.XP) == "table" and old.XP or {}
-			local oldStars = type(old) == "table" and type(old.Stars) == "table" and old.Stars or {}
-			for name, got in pairs(obtained) do
-				local left = got - (deleted[name] or 0)
-				if left > 0 then
-					units[name] = left
-					if profile.Locked[name] then
-						locked[name] = true
-					end
-					-- keep this server's trait, or the one another server saved
-					traits[name] = profile.Traits[name]
-						or (type(old) == "table" and type(old.Traits) == "table" and TraitData.Get(old.Traits[name]) and old.Traits[name])
-						or nil
-					xpOut[name] = profile.XP[name] or tonumber(oldXP[name])
-					starsOut[name] = profile.Stars[name] or tonumber(oldStars[name])
-				end
-			end
-
-			local equipped = {}
-			for _, name in ipairs(profile.Equipped) do
-				if units[name] then
-					table.insert(equipped, name)
-				end
-			end
-
-			-- beaten levels: keep every level either server has seen beaten
+			-- beaten levels: keep every level either this or another server has seen beaten
 			local cleared = {}
 			for id in pairs(profile.Cleared) do
 				cleared[id] = true
@@ -355,26 +572,51 @@ function PlayerData.Save(player)
 			table.sort(clearedList)
 
 			return {
+				Version = SAVE_VERSION,
 				Gems = profile.Gems,
 				Gold = profile.Gold,
+				Shards = profile.Shards,
 				Pity = profile.Pity,
 				Units = units,
-				Obtained = obtained,
-				Deleted = deleted,
-				Locked = locked,
-				Equipped = equipped,
+				NextId = profile.NextId,
+				Equipped = table.clone(profile.Equipped),
 				AutoEquip = profile.AutoEquip,
 				AutoDelete = table.clone(profile.AutoDelete),
 				Cleared = clearedList,
-				Traits = traits,
-				XP = xpOut,
-				Stars = starsOut,
+				BonusSlots = profile.BonusSlots,
+				UILayout = profile.UILayout,
+				Settings = profile.Settings,
+				-- still in use by this server, or let go (nil)
+				Session = not (release or profile.Released) and { Job = game.JobId, Time = os.time() } or nil,
 			}
 		end)
 	end)
 	if not ok then
 		warn("[PlayerData] save failed:", err)
+	elseif lost then
+		profile.CanSave = false
+		warn("[PlayerData] " .. player.Name .. "'s data is in use by another server now, so this server stops saving it.")
 	end
+end
+
+-- Saves and lets go of the player's data so another server can load it (before a teleport,
+-- and when they leave). Yields until saved. Nothing they do here is saved after this.
+function PlayerData.Release(player)
+	local profile = PlayerData.Profiles[player]
+	if not profile or profile.Released then return end
+	PlayerData.Save(player, true)
+	profile.Released = true
+	profile.SavedBeforeRelease = profile.CanSave
+	profile.CanSave = false
+end
+
+-- The teleport failed and the player is staying here: take their data back
+function PlayerData.Reclaim(player)
+	local profile = PlayerData.Profiles[player]
+	if not profile or not profile.Released then return end
+	profile.Released = false
+	profile.CanSave = profile.SavedBeforeRelease == true
+	PlayerData.RequestSave(player)
 end
 
 -- Saves a few seconds from now (many changes in a row become one write)
@@ -398,6 +640,7 @@ function PlayerData.Refresh(player)
 	PlayerData.RequestSave(player)
 end
 
+-- ===== Currencies =====
 function PlayerData.AddGems(player, amount)
 	local profile = PlayerData.Profiles[player]
 	if not profile then return end
@@ -414,6 +657,43 @@ function PlayerData.AddGold(player, amount)
 	PlayerData.RequestSave(player)
 end
 
+function PlayerData.AddShards(player, amount)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return end
+	profile.Shards = math.max(0, profile.Shards + amount)
+	PlayerData.Sync(player)
+	PlayerData.RequestSave(player)
+end
+
+-- Extra inventory slots that are saved (rewards, tester command)
+function PlayerData.AddBonusSlots(player, amount)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return end
+	profile.BonusSlots = math.max(0, profile.BonusSlots + amount)
+	PlayerData.Sync(player)
+	PlayerData.RequestSave(player)
+end
+
+-- Saves where the player put their screen elements (from the Screen Layout panel)
+function PlayerData.SaveLayout(player, layout)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	profile.UILayout = cleanLayout(layout)
+	PlayerData.Sync(player)
+	PlayerData.RequestSave(player)
+	return true
+end
+
+-- Saves the on/off settings from the Settings popup
+function PlayerData.SaveSettings(player, settings)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	profile.Settings = cleanSettings(settings)
+	PlayerData.Sync(player)
+	PlayerData.RequestSave(player)
+	return true
+end
+
 -- Records that the player beat a level (unlocks the next one)
 function PlayerData.MarkCleared(player, levelId)
 	local profile = PlayerData.Profiles[player]
@@ -428,79 +708,136 @@ function PlayerData.HasCleared(player, levelId)
 	return profile ~= nil and profile.Cleared[levelId] == true
 end
 
--- Gives one copy of a unit. If you've turned on auto-delete for its rarity (and the unit
--- isn't locked) the copy is deleted straight away. Returns true if it was auto-deleted.
--- The caller runs PlayerData.Refresh afterwards (e.g. once after a 10-pull).
+-- ===== Getting and removing units =====
+-- Gives one new unit from a summon. If you've turned on auto-delete for its rarity it is
+-- deleted straight away (and takes no slot). Returns true if it was auto-deleted.
+-- Summoning checks for free slots first. The caller runs PlayerData.Refresh afterwards.
 function PlayerData.AddUnit(profile, unitName)
-	profile.Obtained[unitName] = (profile.Obtained[unitName] or 0) + 1
-
 	local rarityName = UnitData.UnitRarity[unitName]
-	if profile.AutoDelete[rarityName] and not profile.Locked[unitName] then
-		profile.Deleted[unitName] = (profile.Deleted[unitName] or 0) + 1
+	if profile.AutoDelete[rarityName] then
 		return true
 	end
-
-	profile.Units[unitName] = (profile.Units[unitName] or 0) + 1
+	newUnit(profile, unitName)
 	return false
 end
 
--- amount: a number of copies, or "All". Returns ok, errorMessage
-function PlayerData.DeleteUnit(player, unitName, amount)
+-- Gives units directly, ignoring auto-delete and slots (tester command)
+function PlayerData.GiveUnits(player, unitName, count)
 	local profile = PlayerData.Profiles[player]
 	if not profile then return false, "Still loading." end
-
-	local have = profile.Units[unitName]
-	if not have then return false, "You don't have that unit." end
-	if profile.Locked[unitName] then return false, "Unlock it first." end
-
-	local n = have
-	if amount ~= "All" then
-		n = math.clamp(math.floor(tonumber(amount) or 1), 1, have)
+	for _ = 1, count do
+		newUnit(profile, unitName)
 	end
-
-	profile.Deleted[unitName] = (profile.Deleted[unitName] or 0) + n
-	profile.Units[unitName] = (have - n > 0) and (have - n) or nil
-	if not profile.Units[unitName] then
-		-- the last copy is gone, and its trait, level and stars with it
-		profile.Traits[unitName] = nil
-		profile.XP[unitName] = nil
-		profile.Stars[unitName] = nil
-	end
-
 	PlayerData.Refresh(player)
 	return true
 end
 
-function PlayerData.SetLocked(player, unitName, locked)
+local function removeUnit(profile, id)
+	profile.Units[id] = nil
+	local index = table.find(profile.Equipped, id)
+	if index then
+		table.remove(profile.Equipped, index)
+	end
+end
+
+-- ids = a list of unit ids. Locked units are refused. Returns ok, errorMessage
+function PlayerData.DeleteUnits(player, ids)
 	local profile = PlayerData.Profiles[player]
 	if not profile then return false, "Still loading." end
-	if not profile.Units[unitName] then return false, "You don't have that unit." end
-
-	profile.Locked[unitName] = locked and true or nil
+	if type(ids) ~= "table" or #ids == 0 or #ids > 1000 then return false, "Pick units to delete." end
+	for _, id in ipairs(ids) do
+		local u = PlayerData.FindUnit(profile, id)
+		if not u then return false, "You don't have that unit." end
+		if u.Locked then return false, u.Name .. " is locked. Unlock it first." end
+	end
+	for _, id in ipairs(ids) do
+		removeUnit(profile, id)
+	end
 	PlayerData.Refresh(player)
 	return true
 end
 
--- Manual team editing (only while auto-equip is off)
-function PlayerData.SetEquipped(player, unitName, on)
+function PlayerData.SetLocked(player, id, locked)
 	local profile = PlayerData.Profiles[player]
 	if not profile then return false, "Still loading." end
-	if profile.AutoEquip then return false, "Turn off auto-equip to pick your team." end
-	if not profile.Units[unitName] then return false, "You don't have that unit." end
+	local u = PlayerData.FindUnit(profile, id)
+	if not u then return false, "You don't have that unit." end
+	u.Locked = locked == true
+	PlayerData.Refresh(player)
+	return true
+end
 
-	local index = table.find(profile.Equipped, unitName)
+-- Manual team editing (turns auto-equip off). Equipping a unit whose name is already on
+-- the team swaps it in for that copy.
+function PlayerData.SetEquipped(player, id, on)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	profile.AutoEquip = false
+	local u = PlayerData.FindUnit(profile, id)
+	if not u then return false, "You don't have that unit." end
+
+	local index = table.find(profile.Equipped, id)
 	if on then
 		if index then return true end
-		if #profile.Equipped >= UnitData.TeamSize then
+		local same = PlayerData.EquippedUnit(profile, u.Name)
+		if same then
+			profile.Equipped[table.find(profile.Equipped, same.Id)] = id
+		elseif #profile.Equipped >= UnitData.TeamSize then
 			return false, string.format("Your team is full (%d).", UnitData.TeamSize)
+		else
+			table.insert(profile.Equipped, id)
 		end
-		table.insert(profile.Equipped, unitName)
 	elseif index then
 		table.remove(profile.Equipped, index)
 	end
 
-	PlayerData.Sync(player)
-	PlayerData.RequestSave(player)
+	PlayerData.Refresh(player)
+	return true
+end
+
+-- Puts a unit into team slot `slot` (1 to UnitData.TeamSize), as picked on the team bar.
+--   * the unit is already on the team: it swaps places with whatever is in that slot
+--   * another copy of the same unit is on the team: this copy takes its place, then moves
+--   * the slot holds a different unit: that unit comes off the team
+--   * the slot is empty: the unit goes in the first free slot (slots fill left to right)
+-- Choosing slots by hand turns auto-equip off. Returns ok, errorMessage
+function PlayerData.EquipToSlot(player, id, slot)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	local u = PlayerData.FindUnit(profile, id)
+	if not u then return false, "You don't have that unit." end
+	if typeof(slot) ~= "number" or slot ~= math.floor(slot) or slot < 1 or slot > UnitData.TeamSize then
+		return false, "Pick a team slot."
+	end
+
+	profile.AutoEquip = false
+	local team = profile.Equipped
+	local function moveTo(from)
+		if slot <= #team then
+			team[from], team[slot] = team[slot], team[from]
+		else
+			table.remove(team, from)
+			table.insert(team, id)
+		end
+	end
+
+	local at = table.find(team, id)
+	local same = PlayerData.EquippedUnit(profile, u.Name)
+	if at then
+		moveTo(at)
+	elseif same then
+		local from = table.find(team, same.Id)
+		team[from] = id
+		moveTo(from)
+	elseif slot <= #team then
+		team[slot] = id
+	elseif #team < UnitData.TeamSize then
+		table.insert(team, id)
+	else
+		return false, string.format("Your team is full (%d).", UnitData.TeamSize)
+	end
+
+	PlayerData.Refresh(player)
 	return true
 end
 
@@ -508,105 +845,6 @@ function PlayerData.SetAutoEquip(player, on)
 	local profile = PlayerData.Profiles[player]
 	if not profile then return false, "Still loading." end
 	profile.AutoEquip = on and true or false
-	PlayerData.Refresh(player)
-	return true
-end
-
--- Rolls a new random trait onto a unit for TraitData.RollCost Gold.
--- Returns ok, errorMessage, newTraitName
-function PlayerData.RollTrait(player, unitName)
-	local profile = PlayerData.Profiles[player]
-	if not profile then return false, "Still loading." end
-	if not profile.Units[unitName] then return false, "You don't have that unit." end
-	if profile.Gold < TraitData.RollCost then
-		return false, string.format("You need %d Gold to roll a trait.", TraitData.RollCost)
-	end
-
-	profile.Gold -= TraitData.RollCost
-	local trait = TraitData.Roll()
-	profile.Traits[unitName] = trait
-	PlayerData.Refresh(player) -- the trait can change who auto-equip picks
-	return true, nil, trait
-end
-
--- Fuses other units into `target` for XP. feed = { [unitName] = copies }.
--- Locked units can't be fed, and a unit can't be fed into itself (use Evolve for that).
--- Returns ok, errorMessage, xpGained
-function PlayerData.Fuse(player, target, feed)
-	local profile = PlayerData.Profiles[player]
-	if not profile then return false, "Still loading." end
-	if not profile.Units[target] then return false, "You don't have that unit." end
-	if type(feed) ~= "table" then return false, "Pick units to fuse." end
-
-	local maxXP = ProgressData.MaxXP()
-	local currentXP = profile.XP[target] or 0
-	if currentXP >= maxXP then return false, target .. " is already max level." end
-
-	-- check everything first, so a bad entry can't half-finish the fusion
-	local plan, gained = {}, 0
-	for name, n in pairs(feed) do
-		n = tonumber(n)
-		if type(name) ~= "string" or not n or n < 1 or n ~= math.floor(n) then
-			return false, "Bad fusion request."
-		end
-		if name == target then return false, "Use Evolve to use copies of the same unit." end
-		local have = profile.Units[name]
-		if not have or have < n then return false, "You don't have enough " .. name .. "." end
-		if profile.Locked[name] then return false, name .. " is locked." end
-		plan[name] = n
-		gained += n * ProgressData.FodderXP[UnitData.UnitRarity[name]]
-	end
-	if gained == 0 then return false, "Pick units to fuse." end
-
-	for name, n in pairs(plan) do
-		profile.Deleted[name] = (profile.Deleted[name] or 0) + n
-		local left = profile.Units[name] - n
-		profile.Units[name] = left > 0 and left or nil
-		if left <= 0 then
-			profile.Traits[name] = nil
-			profile.XP[name] = nil
-			profile.Stars[name] = nil
-		end
-	end
-	profile.XP[target] = math.min(currentXP + gained, maxXP)
-
-	PlayerData.Refresh(player)
-	return true, nil, profile.XP[target] - currentXP
-end
-
--- Uses extra copies of a unit (and Gold) to give it one more star. Returns ok, errorMessage
-function PlayerData.Evolve(player, unitName)
-	local profile = PlayerData.Profiles[player]
-	if not profile then return false, "Still loading." end
-	local have = profile.Units[unitName]
-	if not have then return false, "You don't have that unit." end
-
-	local stars = profile.Stars[unitName] or 0
-	local step = ProgressData.Evolutions[stars + 1]
-	if not step then return false, unitName .. " is fully evolved." end
-	if have - 1 < step.Copies then
-		return false, string.format("You need %d extra %s (you have %d extra).", step.Copies, unitName, have - 1)
-	end
-	if profile.Gold < step.Gold then
-		return false, string.format("You need %d Gold to evolve.", step.Gold)
-	end
-
-	profile.Gold -= step.Gold
-	profile.Deleted[unitName] = (profile.Deleted[unitName] or 0) + step.Copies
-	profile.Units[unitName] = have - step.Copies
-	profile.Stars[unitName] = stars + 1
-
-	PlayerData.Refresh(player)
-	return true
-end
-
--- Sets a unit's trait directly (tester command). nil removes it.
-function PlayerData.SetTrait(player, unitName, traitName)
-	local profile = PlayerData.Profiles[player]
-	if not profile then return false, "Still loading." end
-	if not profile.Units[unitName] then return false, "You don't have that unit." end
-	if traitName ~= nil and not TraitData.Get(traitName) then return false, "Unknown trait." end
-	profile.Traits[unitName] = traitName
 	PlayerData.Refresh(player)
 	return true
 end
@@ -622,13 +860,135 @@ function PlayerData.SetAutoDelete(player, rarityName, on)
 	return true
 end
 
+-- ===== Traits, fusing, evolving =====
+-- Summons a random trait onto a unit in the Traits Cave for TraitData.SummonCost Trait Shards.
+-- It replaces the unit's current trait. Returns ok, errorMessage, newTraitName
+function PlayerData.SummonTrait(player, id)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	local u = PlayerData.FindUnit(profile, id)
+	if not u then return false, "You don't have that unit." end
+	if profile.Shards < TraitData.SummonCost then
+		return false, "You're out of Trait Shards. Win levels to earn more."
+	end
+
+	profile.Shards -= TraitData.SummonCost
+	u.Trait = TraitData.Roll()
+	PlayerData.Refresh(player) -- the trait can change who auto-equip picks
+	return true, nil, u.Trait
+end
+
+-- Fuses other units into `targetId` for XP. feedIds = a list of unit ids.
+-- Locked units and units on your team can't be fed. Returns ok, errorMessage, xpGained
+function PlayerData.Fuse(player, targetId, feedIds)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	local target = PlayerData.FindUnit(profile, targetId)
+	if not target then return false, "You don't have that unit." end
+	if type(feedIds) ~= "table" or #feedIds == 0 or #feedIds > 1000 then return false, "Pick units to fuse." end
+
+	local maxXP = ProgressData.MaxXP()
+	if target.XP >= maxXP then return false, target.Name .. " is already max level." end
+
+	-- check everything first, so a bad entry can't half-finish the fusion
+	local seen, gained = {}, 0
+	for _, id in ipairs(feedIds) do
+		local u = PlayerData.FindUnit(profile, id)
+		if not u or seen[id] then return false, "Bad fusion request." end
+		if id == targetId then return false, "A unit can't be fused into itself." end
+		if u.Locked then return false, u.Name .. " is locked." end
+		if table.find(profile.Equipped, id) then return false, u.Name .. " is on your team." end
+		seen[id] = true
+		gained += ProgressData.FodderXP[UnitData.UnitRarity[u.Name]]
+	end
+
+	for _, id in ipairs(feedIds) do
+		removeUnit(profile, id)
+	end
+	local before = target.XP
+	target.XP = math.min(before + gained, maxXP)
+
+	PlayerData.Refresh(player)
+	return true, nil, target.XP - before
+end
+
+-- The spare copies Evolve would use for this unit: same name, not locked, not on the team,
+-- no stars. Copies without a trait and with the least XP go first.
+function PlayerData.EvolveFodder(profile, unit)
+	local spare = {}
+	for _, u in pairs(profile.Units) do
+		if u.Id ~= unit.Id and u.Name == unit.Name and not u.Locked and u.Stars == 0
+			and not table.find(profile.Equipped, u.Id) then
+			table.insert(spare, u)
+		end
+	end
+	table.sort(spare, function(a, b)
+		if (a.Trait == nil) ~= (b.Trait == nil) then return a.Trait == nil end
+		if a.XP ~= b.XP then return a.XP < b.XP end
+		return a.Id < b.Id
+	end)
+	return spare
+end
+
+-- Uses spare copies of the same unit (and Gold) to give it one more star. Returns ok, errorMessage
+function PlayerData.Evolve(player, id)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	local unit = PlayerData.FindUnit(profile, id)
+	if not unit then return false, "You don't have that unit." end
+
+	local step = ProgressData.Evolutions[unit.Stars + 1]
+	if not step then return false, unit.Name .. " is fully evolved." end
+	local spare = PlayerData.EvolveFodder(profile, unit)
+	if #spare < step.Copies then
+		return false, string.format("You need %d spare %s (you have %d). Spares can't be locked, on your team or evolved.",
+			step.Copies, unit.Name, #spare)
+	end
+	if profile.Gold < step.Gold then
+		return false, string.format("You need %d Gold to evolve.", step.Gold)
+	end
+
+	profile.Gold -= step.Gold
+	for i = 1, step.Copies do
+		removeUnit(profile, spare[i].Id)
+	end
+	unit.Stars += 1
+
+	PlayerData.Refresh(player)
+	return true
+end
+
+-- Sets a unit's trait directly (tester command). nil removes it.
+function PlayerData.SetTrait(player, unit, traitName)
+	if traitName ~= nil and not TraitData.Get(traitName) then return false, "Unknown trait." end
+	unit.Trait = traitName
+	PlayerData.Refresh(player)
+	return true
+end
+
+-- ===== Slot game passes =====
+-- Buying a slot pass in-game adds its slots straight away
+MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, passId, purchased)
+	if not purchased then return end
+	local profile = PlayerData.Profiles[player]
+	if not profile then return end
+	for _, pass in ipairs(UnitData.SlotPasses) do
+		if pass.Id == passId and pass.Id ~= 0 then
+			checkSlotPasses(player, profile)
+			PlayerData.Sync(player)
+			return
+		end
+	end
+end)
+
+-- ===== Lifecycle =====
 Players.PlayerAdded:Connect(PlayerData.Load)
 for _, p in ipairs(Players:GetPlayers()) do
 	task.spawn(PlayerData.Load, p)
 end
 
 Players.PlayerRemoving:Connect(function(player)
-	PlayerData.Save(player)
+	PlayerData.Release(player)
 	PlayerData.Profiles[player] = nil
 end)
 
@@ -648,7 +1008,7 @@ game:BindToClose(function()
 	for player in pairs(PlayerData.Profiles) do
 		pending += 1
 		task.spawn(function()
-			PlayerData.Save(player)
+			PlayerData.Release(player)
 			pending -= 1
 		end)
 	end
