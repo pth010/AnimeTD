@@ -1,8 +1,8 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: Animations
--- (replaces the earlier version: the Eclipse Emperor's slam has a bigger eclipse and a bolder
---  slash: three crescents and a glowing cut line through the enemy)
+-- (replaces the earlier version: the eclipse over the Eclipse Emperor floats a head's height
+--  higher)
 -- Every attack shows an effect that suits the weapon: slash crescents for swords, a magic
 -- circle and a bursting orb for mages, a streak and shockwave for lances, glowing arrows for
 -- bows (see ATTACK EFFECTS below). Special units can have a signature attack of their own
@@ -605,7 +605,7 @@ local ECL_RUBBLE = Color3.fromRGB(70, 60, 70)
 
 function EFFECTS.Eclipse(hitbox, target, _, speed)
 	local blade = hitbox:FindFirstChild("Blade", true)
-	local top = hitbox.Position + Vector3.new(0, hitbox.Size.Y / 2 + 4.5, 0)
+	local top = hitbox.Position + Vector3.new(0, hitbox.Size.Y / 2 + 5.8, 0) -- (a head's height clear of him)
 
 	-- 1. the windup: an eclipse rises behind his head, turned to face your camera: a black sun
 	-- with a crimson ring that swells, then fades as the sword comes down
