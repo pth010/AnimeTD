@@ -1,8 +1,8 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: Animations
--- (replaces the earlier version: the Damage Challenge's Ancient Golem stands still, slowly
---  swaying its arms)
+-- (replaces the earlier version: the Eclipse Emperor's signature attack: he leaps up with his
+--  sword raised over his head, an eclipse rising behind it, and slams it down on the enemy)
 -- Every attack shows an effect that suits the weapon: slash crescents for swords, a magic
 -- circle and a bursting orb for mages, a streak and shockwave for lances, glowing arrows for
 -- bows (see ATTACK EFFECTS below). Special units can have a signature attack of their own
@@ -18,6 +18,8 @@
 --       Cast       staffs: raise the staff high, then point it at the enemy
 --       Starfall   Starfall Kitsune: spin the staff round, aim it like a wand, fire, recoil
 --       Phoenix    Phoenix Archer: raise the bow, rise up on her wings while drawing, loose
+--       Eclipse    Eclipse Emperor: leap up with the sword raised over his head in both
+--                  hands, then slam it down on the enemy
 --       Shoot      bows: hold the bow out, draw and let go
 --       Farm       cash units don't attack; they fan or toss a coin each time they pay, and a
 --                  gold bar over them fills up to the next payout
@@ -113,6 +115,20 @@ local ATTACKS = {
 		ArmR = { { 0, 0 }, { 0.2, 95 }, { 0.48, 72 }, { 0.53, 30 }, { 0.75, 35 }, { 1, 0 } },
 		Lunge = { { 0, 0 }, { 0.48, -0.35 }, { 0.55, 0.3 }, { 0.7, 0 }, { 1, 0 } },
 		Rise = { { 0, 0 }, { 0.45, 0.7 }, { 0.6, 0.8 }, { 1, 0 } },
+	},
+	-- Eclipse Emperor's signature: he leaps up and leans back, raising the sword high over his
+	-- head in both hands so the blade hangs down behind him, then slams it down (at 0.5 of the
+	-- way through, 0.35s in, which is when the blow lands: HitDelay + Windup in UnitModels):
+	-- his arms come down in front and the sword turns in his hand (Grip, see SWORD_GRIP in
+	-- UnitModels) so the blade chops forward and down onto the enemy. He lunges forward and
+	-- lands hard, holds the blade down on the enemy, and straightens up. (Fits his 2s cooldown.)
+	Eclipse = {
+		Time = 0.7,
+		ArmR = { { 0, 0 }, { 0.3, 150 }, { 0.43, 178 }, { 0.5, 75 }, { 0.75, 75 }, { 1, 0 } },
+		ArmL = { { 0, 0 }, { 0.3, 140 }, { 0.43, 168 }, { 0.5, 70 }, { 0.75, 70 }, { 1, 0 } },
+		Grip = { { 0, 0 }, { 0.43, 0 }, { 0.5, -150 }, { 0.75, -150 }, { 1, 0 } },
+		Lunge = { { 0, 0 }, { 0.43, -0.4 }, { 0.5, 1.0 }, { 0.75, 1.0 }, { 1, 0 } },
+		Rise = { { 0, 0 }, { 0.3, 0.6 }, { 0.43, 0.8 }, { 0.5, 0 }, { 1, 0 } },
 	},
 }
 local ATTACK_TIME = 0.4  -- seconds an attack takes at 1x (unless its pose has its own Time)
@@ -336,6 +352,11 @@ end
 --              arrow, then she looses a phoenix of fire: it flies at the enemy in an arc,
 --              flapping its wings, trailing flame and dropping embers, and bursts into a
 --              fireball, a ring of fire across the floor, feathers flying out and rising embers
+--   Eclipse    as he raises the sword, an eclipse (a black sun ringed in crimson) rises behind
+--              his head and red energy streams into the blade, which glows. When it comes down:
+--              a crimson slash straight down through the enemy, a dark blast with a white
+--              flash, a black sun burned into the ground, shockwaves, cracks running out across
+--              the floor, and rubble and red sparks thrown up
 local SIGNATURES = UnitModels.Signatures -- (the list is in UnitModels: GameService times their damage by it)
 
 local STAR_PINK = Color3.fromRGB(255, 120, 200)
@@ -575,6 +596,100 @@ function EFFECTS.Phoenix(hitbox, target, _, speed)
 		end
 		sparks(target, PHX_GOLD, 5, 4, 0.35 / speed)
 	end)
+end
+
+local ECL_RED = Color3.fromRGB(255, 60, 90)
+local ECL_BLOOD = Color3.fromRGB(150, 10, 30)
+local ECL_DARK = Color3.fromRGB(20, 8, 24)
+local ECL_RUBBLE = Color3.fromRGB(70, 60, 70)
+
+function EFFECTS.Eclipse(hitbox, target, _, speed)
+	local blade = hitbox:FindFirstChild("Blade", true)
+	local top = hitbox.Position + Vector3.new(0, hitbox.Size.Y / 2 + 3.5, 0)
+
+	-- 1. the windup: an eclipse rises behind his head, turned to face your camera: a black sun
+	-- with a crimson ring that swells, then fades as the sword comes down
+	local toCamera = CFrame.lookAt(top, camera.CFrame.Position)
+	local sun = fxPart(Vector3.new(0.4, 0.4, 0.4), toCamera, ECL_DARK, Enum.PartType.Ball)
+	sun.Material = Enum.Material.SmoothPlastic
+	TweenService:Create(sun, TweenInfo.new(WINDUP.Eclipse / speed, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		{ Size = Vector3.new(2.6, 2.6, 2.6) }):Play()
+	task.delay(WINDUP.Eclipse / speed, function()
+		fade(sun, 0.25 / speed, { Size = Vector3.new(3.2, 3.2, 3.2) })
+	end)
+	ring(toCamera * CFrame.new(0, 0, 0.3), 1.45, 0.6, ECL_RED, (WINDUP.Eclipse + 0.25) / speed, 16)
+	local corona = Instance.new("PointLight")
+	corona.Color = ECL_RED
+	corona.Range = 12
+	corona.Brightness = 3
+	corona.Parent = sun
+
+	-- red energy streams into the blade, and the blade glows (the glow is welded on, so it
+	-- follows the swing)
+	if blade and blade:IsA("BasePart") then
+		for _ = 1, 8 do
+			local from = blade.Position + Vector3.new(math.random() - 0.5, math.random() - 0.3, math.random() - 0.5).Unit * 3
+			local mote = fxPart(Vector3.new(0.3, 0.3, 0.3), CFrame.new(from), ECL_RED)
+			fade(mote, WINDUP.Eclipse * 0.9 / speed, { CFrame = CFrame.new(blade.Position), Size = Vector3.new(0.08, 0.08, 0.08) })
+		end
+		local glow = fxPart(blade.Size * Vector3.new(2.2, 1.05, 1.6), blade.CFrame, ECL_RED)
+		glow.Transparency = 0.35
+		glow.Anchored = false
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0, weld.Part1, weld.Parent = blade, glow, glow
+		fade(glow, (WINDUP.Eclipse + 0.35) / speed, {})
+	end
+
+	-- 2. the sword comes down
+	task.wait(WINDUP.Eclipse / speed)
+	if not hitbox.Parent then return end
+	local facing = CFrame.lookAt(hitbox.Position, Vector3.new(target.X, hitbox.Position.Y, target.Z)).Rotation
+	-- a crimson slash straight down through the enemy (a crescent stood on end)
+	crescent(target + Vector3.new(0, 0.5, 0), facing, ECL_RED, 90, 3.8, 0.35 / speed)
+	-- a dark blast with a white flash in it
+	local flash = fxPart(Vector3.new(1, 1, 1), CFrame.new(target), WHITE_HOT, Enum.PartType.Ball)
+	fade(flash, 0.12 / speed, { Size = Vector3.new(5, 5, 5) })
+	local blast = fxPart(Vector3.new(2, 2, 2), CFrame.new(target), ECL_BLOOD, Enum.PartType.Ball)
+	blast.Transparency = 0.2
+	fade(blast, 0.4 / speed, { Size = Vector3.new(8, 8, 8) })
+	local dark = fxPart(Vector3.new(2.5, 2.5, 2.5), CFrame.new(target), ECL_DARK, Enum.PartType.Ball)
+	dark.Material = Enum.Material.SmoothPlastic
+	dark.Transparency = 0.4
+	fade(dark, 0.5 / speed, { Size = Vector3.new(9, 9, 9) })
+	local light = Instance.new("PointLight")
+	light.Color = ECL_RED
+	light.Range = 18
+	light.Brightness = 5
+	light.Parent = blast
+	TweenService:Create(light, TweenInfo.new(0.4 / speed), { Brightness = 0 }):Play()
+
+	-- on the ground: a black sun burned in, ringed in crimson, shockwaves, and cracks
+	local ground = groundBelow(hitbox, target) + Vector3.new(0, 0.12, 0)
+	local flat = CFrame.new(ground) * CFrame.Angles(0, 0, R(90)) -- a cylinder lying flat
+	local scorch = fxPart(Vector3.new(0.1, 2, 2), flat, ECL_DARK, Enum.PartType.Cylinder)
+	scorch.Material = Enum.Material.SmoothPlastic
+	fade(scorch, 0.9 / speed, { Size = Vector3.new(0.1, 6, 6) })
+	local rim = fxPart(Vector3.new(0.08, 2.4, 2.4), flat * CFrame.new(-0.02, 0, 0), ECL_RED, Enum.PartType.Cylinder)
+	fade(rim, 0.6 / speed, { Size = Vector3.new(0.08, 7, 7) })
+	local level = CFrame.new(ground + Vector3.new(0, 0.1, 0)) * CFrame.Angles(R(90), 0, 0)
+	ring(level, 1.5, 6, ECL_RED, 0.45 / speed, 16)
+	ring(level * CFrame.Angles(0, 0, R(11)), 1, 3.5, ECL_DARK, 0.55 / speed, 12)
+	for k = 1, 8 do
+		local a = k / 8 * TAU + math.random() * 0.4
+		local dir = Vector3.new(math.cos(a), 0, math.sin(a))
+		local length = 2.5 + math.random() * 2.5
+		local crack = fxPart(Vector3.new(0.18, 0.06, length), CFrame.lookAt(ground + dir * (1 + length / 2), ground + dir * 10), ECL_RED)
+		fade(crack, 0.7 / speed, { Size = Vector3.new(0.05, 0.03, length * 1.2) })
+	end
+
+	-- rubble and red sparks thrown up
+	for _ = 1, 7 do
+		local dir = Vector3.new(math.random() - 0.5, 1 + math.random(), math.random() - 0.5).Unit
+		local chunk = fxPart(Vector3.new(0.45, 0.45, 0.45), CFrame.new(ground) * CFrame.Angles(math.random() * 6, math.random() * 6, 0), ECL_RUBBLE)
+		chunk.Material = Enum.Material.Slate
+		fade(chunk, 0.5 / speed, { CFrame = chunk.CFrame + dir * 3.5, Size = Vector3.new(0.15, 0.15, 0.15) })
+	end
+	sparks(target, ECL_RED, 8, 4, 0.4 / speed)
 end
 
 local function playEffect(hitbox, style, speed)

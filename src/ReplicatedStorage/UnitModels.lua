@@ -1,7 +1,8 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: UnitModels
--- (replaces the earlier version: the fringe across the forehead joins up with the side locks)
+-- (replaces the earlier version: the Eclipse Emperor has a signature attack, "Eclipse": he
+--  raises his sword over his head and slams it down on the enemy)
 -- Builds the character model for each unit out of parts (no uploaded assets needed).
 -- Every unit has a "look" below. Change them freely.
 --
@@ -999,7 +1000,12 @@ local HELD = {
 -- Parts that turn with a staff, bow or lance on its Grip joint (see UnitModels.Rig)
 local GRIPPED = {
 	StaffCap = true, Orb = true, BowLimb = true, BowString = true, Tip = true, Pennant = true, TipGlow = true,
+	Guard = true, Blade = true, Edge = true, -- (a sword, for units in SWORD_GRIP)
 }
+
+-- Units whose sword turns in the hand on a Grip joint too, like a staff, so their attack can
+-- swing the blade round (the Eclipse Emperor chops down at the enemy with it)
+local SWORD_GRIP = { ["Eclipse Emperor"] = true }
 
 local ATTACK_STYLES = {
 	Sword = "Slash", Katana = "Slash", SwordShield = "Slash", Daggers = "DualSlash",
@@ -1017,11 +1023,13 @@ end
 UnitModels.Signatures = {
 	["Starfall Kitsune"] = "Starfall",
 	["Phoenix Archer"] = "Phoenix",
+	["Eclipse Emperor"] = "Eclipse",
 }
 -- How long into the attack animation each attack lands its blow or lets its shot go (seconds at 1x)
-UnitModels.HitDelay = { Slash = 0.12, DualSlash = 0.06, Thrust = 0.1, Cast = 0.12, Shoot = 0.2, Starfall = 0.15, Phoenix = 0.1 }
+UnitModels.HitDelay = { Slash = 0.12, DualSlash = 0.06, Thrust = 0.1, Cast = 0.12, Shoot = 0.2, Starfall = 0.15, Phoenix = 0.1, Eclipse = 0.05 }
 -- A moment more some effects take before the shot goes (the star charging, the arrow catching fire)
-UnitModels.Windup = { Starfall = 0.075, Phoenix = 0.15 }
+-- (the Eclipse Emperor's is his sword going up over his head before it comes down)
+UnitModels.Windup = { Starfall = 0.075, Phoenix = 0.15, Eclipse = 0.3 }
 -- Shots that fly to the enemy: { studs per second, shortest flight, longest flight }
 local FLIGHTS = { Cast = { 120, 0.08, 0.25 }, Shoot = { 140, 0.06, 0.2 }, Phoenix = { 90, 0.12, 0.3 } }
 
@@ -1087,7 +1095,7 @@ function UnitModels.Rig(model, hitbox, feet)
 	-- A bow does the same, turning round its grip, so it can stand upright while the arm aims,
 	-- and so does a lance's pole, so it can point at the enemy on a thrust.
 	local staff = model:FindFirstChild("Staff", true) or model:FindFirstChild("BowGrip", true)
-		or model:FindFirstChild("Pole", true)
+		or model:FindFirstChild("Pole", true) or (SWORD_GRIP[model.Name] and model:FindFirstChild("Handle", true))
 	local staffArm = staff and staff:IsA("BasePart")
 		and arms[feet:PointToObjectSpace(staff.Position).X < 0 and "ArmL" or "ArmR"]
 	if staffArm then
