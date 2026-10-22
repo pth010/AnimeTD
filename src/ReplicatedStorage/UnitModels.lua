@@ -1,8 +1,9 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: UnitModels
--- (replaces the earlier version: every unit has the rounded Roblox head (no neck) on the
---  blocky body, with its face, hair, hats and helmets refitted round it)
+-- (replaces the earlier version: the ninjas wear a short flat-topped hood with an eye slit,
+--  the Iron Guard a flat-topped bucket helm, and every face is sized to fill the gap its
+--  hair, hood or helmet leaves open)
 -- Builds the character model for each unit out of parts (no uploaded assets needed).
 -- Every unit has a "look" below. Change them freely.
 --
@@ -239,8 +240,11 @@ local function buildBody(m, look)
 	end
 	add(m, "Torso", Vector3.new(2, 2, 1), CFrame.new(0, 3, 0), shirt)
 	upright(m, "Head", HEAD_R * 2, HEAD_TOP - 4, Vector3.new(0, (HEAD_TOP + 4) / 2, 0), skin)
-	-- the rounded top: a ball whose lower half hides inside the straight part
-	ball(m, "HeadRound", HEAD_R * 2, CFrame.new(0, HEAD_TOP, 0), skin)
+	-- the rounded top: a ball whose lower half hides inside the straight part (left off
+	-- under a flat-topped hood or helmet, so the head can be shorter)
+	if look.Hair ~= "Hood" and look.Hair ~= "BucketHelm" then
+		ball(m, "HeadRound", HEAD_R * 2, CFrame.new(0, HEAD_TOP, 0), skin)
+	end
 end
 
 -- ===== Outfits (on top of the body) =====
@@ -319,8 +323,9 @@ function OUTFITS.Miko(m, look)
 end
 
 -- ===== Faces (drawn with thin parts so they show in menu pictures too) =====
--- The face is drawn at FACE_SCALE of the sizes below and FACE_Y lower than the middle of the
--- head, so it fits in the skin that shows between the hair and the shoulders.
+-- Each face is drawn at FACE_SCALE of the sizes below, FACE_Y from the middle of the head.
+-- Both are worked out for every unit (see fitFace) so its face fills the gap its hair, hood or
+-- helmet leaves open.
 local FACE_SCALE = 0.7
 local FACE_Y = -0.13
 
@@ -499,10 +504,16 @@ end
 
 function HAIR.Hood(m, look)
 	local c = look.HairColor
-	-- a hood over the head and down the back, open round the face, and a mask over the
-	-- mouth and nose
-	ball(m, "HoodTop", HEAD_R * 2 + 0.22, CFrame.new(0, HEAD_TOP + 0.1, 0.14), c, Enum.Material.Fabric)
-	upright(m, "HoodBack", HEAD_R * 2 + 0.22, HEAD_TOP + 0.1 - 3.95, Vector3.new(0, (HEAD_TOP + 0.1 + 3.95) / 2, 0.14), c, Enum.Material.Fabric)
+	-- a flat-topped cloth hood over the head and down the back, open round the face, tied at
+	-- the back with two tails hanging down, and a mask over the mouth and nose
+	local top = HEAD_TOP + 0.33
+	upright(m, "Hood", HEAD_R * 2 + 0.22, top - 3.95, Vector3.new(0, (top + 3.95) / 2, 0.14), c, Enum.Material.Fabric)
+	-- the hood comes down over the forehead, leaving only a slit for the eyes
+	arc(m, "HoodBrow", HEAD_R + 0.05, (4.6 + top) / 2, -52, 52, 9, top - 4.6, 0.1, c, Enum.Material.Fabric)
+	ball(m, "HoodKnot", 0.3, CFrame.new(0, top - 0.2, 0.14 + HEAD_R + 0.12), c, Enum.Material.Fabric)
+	for _, side in ipairs({ -1, 1 }) do
+		add(m, "HoodTail", Vector3.new(0.2, 0.7, 0.06), CFrame.new(side * 0.14, top - 0.55, 0.14 + HEAD_R + 0.16) * CFrame.Angles(R(-12), 0, R(side * 14)), c, Enum.Material.Fabric)
+	end
 	upright(m, "Mask", HEAD_R * 2 + 0.04, 0.4, Vector3.new(0, 4.2, 0), look.Pants, Enum.Material.Fabric)
 end
 
@@ -532,15 +543,17 @@ end
 function HAIR.BucketHelm(m, look)
 	local metal = look.Metal or METAL
 	-- a closed round helmet with a visor slit and breathing holes
+	-- (flat on top like the ninja hood, over a flat head, so it's no taller than it needs to be)
 	local size = HEAD_R * 2 + 0.16
-	upright(m, "Helmet", size, HEAD_TOP - 3.98, Vector3.new(0, (HEAD_TOP + 3.98) / 2, 0), metal, Enum.Material.Metal)
-	ball(m, "HelmetTop", size, CFrame.new(0, HEAD_TOP, 0), metal, Enum.Material.Metal)
+	local top = HEAD_TOP + 0.33
+	upright(m, "Helmet", size, top - 3.98, Vector3.new(0, (top + 3.98) / 2, 0), metal, Enum.Material.Metal)
+	upright(m, "HelmetRim", size + 0.06, 0.12, Vector3.new(0, top - 0.06, 0), metal, Enum.Material.Metal)
 	arc(m, "Visor", size / 2 + 0.01, 4.5, -50, 50, 8, 0.1, 0.05, DARK)
 	for k = -1, 1 do
 		local a = R(k * 18)
 		add(m, "Vent", Vector3.new(0.08, 0.22, 0.05), CFrame.new(math.sin(a) * (size / 2 + 0.01), 4.2, -math.cos(a) * (size / 2 + 0.01)) * CFrame.Angles(0, -a, 0), DARK)
 	end
-	add(m, "Crest", Vector3.new(0.16, 0.3, 1.0), CFrame.new(0, HEAD_TOP + size / 2 + 0.05, 0), look.Accent)
+	add(m, "Crest", Vector3.new(0.16, 0.3, 1.0), CFrame.new(0, top + 0.15, 0), look.Accent)
 end
 
 function HAIR.WizardHat(m, look)
@@ -653,6 +666,39 @@ function HAIR.Hairpin(m, look)
 	ball(m, "BowKnot", 0.22, CFrame.new(0, HEAD_TOP + 0.2, HAIR_SIZE / 2 + HAIR_BACK + 0.06), look.Accent)
 	add(m, "Hairpin", Vector3.new(0.07, 0.07, 0.85), CFrame.new(0.5, HEAD_TOP + 0.3, 0.18) * CFrame.Angles(0, R(30), 0), GOLD, Enum.Material.Metal)
 	ball(m, "PinBead", 0.18, CFrame.new(0.6, HEAD_TOP + 0.3, -0.18), GOLD, Enum.Material.Neon)
+end
+
+-- ===== Fitting the face into its opening =====
+-- The gap each style leaves for the face: { top, half width }. The bottom is always the chin
+-- (where the head meets the shoulders). Styles not listed use the hair cap's gap.
+local FACE_OPENINGS = {
+	Headband = { BAND_Y - 0.09, 0.5 },      -- bald: the whole face, up to the headband
+	Topknot = { BAND_Y - 0.09, 0.34 },      -- between the side locks, up to the headband
+	Crescent = { BAND_Y - 0.06, 0.34 },     -- up to the tiara
+	Crown = { BAND_Y - 0.06, 0.34 },        -- up to the crown
+	KnightHelm = { BAND_Y - 0.08, 0.4 },    -- inside the helmet, up to its rim
+	HornedHelm = { BAND_Y - 0.08, 0.4 },
+}
+local HAIRLINE = { HEAD_TOP + 0.12, 0.34 } -- under a hair cap: up to the hairline
+local CHIN = 4
+
+-- How much room each face takes at full size: { top, bottom, half width } (the brows, or the
+-- eyes when there are none; the mouth; the widest feature)
+local FACE_BOXES = {
+	Smile = { 0.25, -0.31, 0.33 }, Grin = { 0.25, -0.33, 0.35 }, Angry = { 0.38, -0.3, 0.42 },
+	Calm = { 0.13, -0.29, 0.35 }, Cool = { 0.23, -0.31, 0.45 }, Fierce = { 0.36, -0.31, 0.42 },
+}
+
+-- Sets FACE_SCALE and FACE_Y so this look's face fills its opening: as big as fits with a
+-- little room at the sides and below the mouth, its top just under the top of the gap.
+local function fitFace(look)
+	FACE_SCALE, FACE_Y = 0.7, -0.13 -- (hoods: only the eyes show, in the slit)
+	local box = FACE_BOXES[look.Face]
+	if look.Hair == "Hood" or not box then return end
+	local gap = FACE_OPENINGS[look.Hair] or HAIRLINE
+	local top, halfWidth = gap[1], gap[2]
+	FACE_SCALE = math.min((halfWidth - 0.04) / box[3], (top - CHIN - 0.1) / (box[1] - box[2]), 0.9)
+	FACE_Y = top - 0.005 - HEAD_Y - box[1] * FACE_SCALE
 end
 
 -- ===== Weapons (held in the hands at the bottom of the arms; right is +X, the front is -Z) =====
@@ -821,6 +867,7 @@ local function buildCharacter(unitName, look)
 	local outfit = OUTFITS[look.Outfit] or OUTFITS.Tee
 	outfit(model, look)
 	local face = FACES[look.Face] or FACES.Smile
+	fitFace(look)
 	face(model, look)
 	if look.Beard then
 		add(model, "Beard", Vector3.new(0.8, 0.55, 0.24), CFrame.new(0, 3.9, -0.6), look.HairColor or WHITE)
