@@ -1,8 +1,7 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: UnitModels
--- (replaces the earlier version: long hair, ponytails and the crown have a fringe of pointed
---  strands across the forehead)
+-- (replaces the earlier version: the fringe across the forehead joins up with the side locks)
 -- Builds the character model for each unit out of parts (no uploaded assets needed).
 -- Every unit has a "look" below. Change them freely.
 --
@@ -454,9 +453,9 @@ end
 
 -- A lock of hair down each side of the face, to `down` (the chin by default): a flat strand
 -- lying against the side of the face, flaring out a little, that ends in a point
-local function sideLocks(m, color, down)
+local function sideLocks(m, color, down, up)
 	local bottom = down or 4.26
-	local top = HEAD_TOP + 0.02
+	local top = up or HEAD_TOP + 0.02
 	local length = top - bottom - 0.1 -- (the point takes the last bit)
 	for _, side in ipairs({ -1, 1 }) do
 		local a = R(side * 48) -- round the head from the front
@@ -471,15 +470,17 @@ end
 
 -- A fringe across the forehead: short flat strands that come down from under the hair cap,
 -- lie on the forehead (leaning back with its curve), sweep a little to the sides and end in a
--- point just above the brows
+-- point just above the brows. The side locks start up level with it (see sideLocks' `up`),
+-- and the outer strands reach round to them, so the fringe and the locks join up.
+local BANGS_TOP = HEAD_TOP + 0.25
 local function bangs(m, color)
-	local top, bottom = HEAD_TOP + 0.25, HEAD_TOP + 0.13
+	local top, bottom = BANGS_TOP, HEAD_TOP + 0.13
 	local length = top - bottom
-	for i, deg in ipairs({ -36, -18, 0, 18, 36 }) do
+	for i, deg in ipairs({ -45, -30, -15, 0, 15, 30, 45 }) do
 		local a = R(deg)
 		local y = (top + bottom) / 2
 		local r = headRadius(y - HEAD_Y) + 0.025
-		local drop = (i % 2 == 0) and 0.04 or 0 -- every other strand a little longer
+		local drop = (i % 2 == 1) and 0.04 or 0 -- every other strand a little longer
 		local strand = CFrame.new(math.sin(a) * r, y - drop / 2, -math.cos(a) * r) * CFrame.Angles(0, -a, 0)
 			* CFrame.Angles(R(-28), 0, R(deg * 0.35))
 		add(m, "Bang", Vector3.new(0.22, length + drop, 0.06), strand, color)
@@ -520,7 +521,7 @@ end
 function HAIR.Ponytail(m, look)
 	local c = look.HairColor
 	hairCap(m, c)
-	sideLocks(m, c)
+	sideLocks(m, c, nil, BANGS_TOP)
 	bangs(m, c)
 	-- tied high at the back, falling down behind
 	local tie = Vector3.new(0, HEAD_TOP + 0.15, HEAD_R + 0.1)
@@ -600,7 +601,7 @@ end
 function HAIR.LongHair(m, look, noBangs)
 	local c = look.HairColor
 	hairCap(m, c)
-	sideLocks(m, c, 4.18)
+	sideLocks(m, c, 4.18, (not noBangs) and BANGS_TOP or nil)
 	longBack(m, c)
 	if not noBangs then bangs(m, c) end
 end
@@ -653,7 +654,7 @@ end
 function HAIR.Crown(m, look)
 	local c = look.HairColor
 	hairCap(m, c)
-	sideLocks(m, c)
+	sideLocks(m, c, nil, BANGS_TOP)
 	bangs(m, c)
 	local y = BAND_Y + 0.22 -- (worn up on the head, so the fringe shows under it)
 	upright(m, "CrownBand", BAND_SIZE + 0.04, 0.3, Vector3.new(0, y, 0), GOLD, Enum.Material.Metal)
