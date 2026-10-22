@@ -1,7 +1,9 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: TraitCaveUI
--- (replaces the earlier version: does nothing in the match place, which has no cave)
+-- (replaces the earlier version: adds TRAIT LOCK, a list of every trait with an on/off switch.
+--  Summoning over a locked trait asks "Are you sure you want to roll?" first. Your locks are
+--  saved; you start with every Legendary and Mythic trait locked.)
 -- Units show a picture of themselves and traits show their icons, in the list, the
 -- summoning circle and the odds.
 -- The Traits Cave window: pick one of your units, then summon a trait onto it for Trait
@@ -304,7 +306,7 @@ local message = label(shrine, "", UDim2.fromOffset(16, 318), UDim2.new(1, -32, 0
 -- ===== Buttons =====
 local oddsBtn = Instance.new("TextButton")
 oddsBtn.Position = UDim2.fromOffset(16, 456)
-oddsBtn.Size = UDim2.fromOffset(150, 52)
+oddsBtn.Size = UDim2.fromOffset(132, 52)
 oddsBtn.Text = "VIEW ODDS"
 oddsBtn.Font = Enum.Font.GothamBlack
 oddsBtn.TextSize = 15
@@ -315,9 +317,15 @@ oddsBtn.Parent = window
 corner(oddsBtn, 12)
 stroke(oddsBtn, TEAL, 1.5, 0.4)
 
+local lockBtn = oddsBtn:Clone()
+lockBtn.Position = UDim2.fromOffset(156, 456)
+lockBtn.Text = "TRAIT LOCK"
+lockBtn.Parent = window
+lockBtn:FindFirstChildOfClass("UIStroke").Color = GOLD
+
 local summonBtn = Instance.new("TextButton")
-summonBtn.Position = UDim2.fromOffset(178, 456)
-summonBtn.Size = UDim2.new(1, -194, 0, 52)
+summonBtn.Position = UDim2.fromOffset(300, 456)
+summonBtn.Size = UDim2.new(1, -316, 0, 52)
 summonBtn.Text = ""
 summonBtn.AutoButtonColor = true
 summonBtn.BackgroundColor3 = WHITE
@@ -407,9 +415,145 @@ end
 oddsBtn.Activated:Connect(function() odds.Visible = true end)
 oddsClose.Activated:Connect(function() odds.Visible = false end)
 
+-- ===== Trait lock window =====
+-- Every trait with an on/off switch. Summoning over a unit's trait that is switched on asks
+-- "Are you sure you want to roll?" first. Saved on the server (PlayerData.TraitLocks).
+local locked = {} -- [traitName] = true, read from the "TraitLocks" attribute
+
+local lockWin = frame(window, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), WHITE)
+lockWin.Active = true
+lockWin.ZIndex = 10
+lockWin.Visible = false
+corner(lockWin, 18)
+gradient(lockWin, { Color3.fromRGB(12, 26, 38), Color3.fromRGB(34, 16, 54) }, 135)
+local lockTitle = label(lockWin, "TRAIT LOCK", UDim2.fromOffset(0, 14), UDim2.new(1, 0, 0, 30), 24, WHITE, Enum.Font.GothamBlack)
+gradient(lockTitle, { Color3.fromRGB(255, 230, 160), Color3.fromRGB(255, 190, 90) }, 0)
+local lockNote = label(lockWin, "Lock the traits you want to keep. Summoning over a locked trait asks you first.",
+	UDim2.fromOffset(16, 44), UDim2.new(1, -32, 0, 18), 13, SUBTLE, Enum.Font.Gotham)
+local lockClose = close:Clone()
+lockClose.Parent = lockWin
+
+local lockList = oddsList:Clone()
+lockList.Parent = lockWin
+for _, c in ipairs(lockList:GetChildren()) do
+	if not c:IsA("UIListLayout") then c:Destroy() end
+end
+
+local switches = {} -- [traitName] = { Track, Knob }
+local function styleSwitch(traitNameText)
+	local s = switches[traitNameText]
+	local on = locked[traitNameText] == true
+	s.Track.BackgroundColor3 = on and GOLD or Color3.fromRGB(60, 66, 88)
+	s.Knob.Position = on and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9)
+	s.Text.Text = on and "LOCKED" or ""
+end
+
+local lockRow = 0
+for i = #TraitData.Tiers, 1, -1 do -- rarest first
+	local tier = TraitData.Tiers[i]
+	lockRow += 1
+	local head = frame(lockList, UDim2.new(), UDim2.new(1, -8, 0, 26), WHITE, 1)
+	head.LayoutOrder = lockRow
+	local headName = label(head, string.upper(tier.Name), UDim2.fromOffset(4, 4), UDim2.fromOffset(200, 20), 14, tier.Color, Enum.Font.GothamBlack)
+	headName.TextXAlignment = Enum.TextXAlignment.Left
+	for _, trait in ipairs(TraitData.Traits) do
+		if trait.Tier == tier.Name then
+			lockRow += 1
+			-- the whole row is the switch
+			local r = Instance.new("TextButton")
+			r.Size = UDim2.new(1, -8, 0, 30)
+			r.Text = ""
+			r.AutoButtonColor = true
+			r.BackgroundColor3 = darker(tier.Color, 0.8)
+			r.LayoutOrder = lockRow
+			r.Parent = lockList
+			corner(r, 8)
+			stroke(r, tier.Color, 1, 0.7)
+			local icon = TraitData.MakeIcon(trait.Name, 24)
+			icon.Position = UDim2.fromOffset(4, 3)
+			icon.Parent = r
+			local name = label(r, trait.Name, UDim2.fromOffset(32, 0), UDim2.new(0, 126, 1, 0), 14, tier.Color, Enum.Font.GothamBlack)
+			name.TextXAlignment = Enum.TextXAlignment.Left
+			local desc = label(r, TraitData.Describe(trait.Name), UDim2.fromOffset(162, 0), UDim2.new(1, -300, 1, 0), 12, SUBTLE, Enum.Font.Gotham)
+			desc.TextXAlignment = Enum.TextXAlignment.Left
+			desc.TextTruncate = Enum.TextTruncate.AtEnd
+			local state = label(r, "", UDim2.new(1, -130, 0, 0), UDim2.fromOffset(70, 30), 11, GOLD, Enum.Font.GothamBlack)
+			state.TextXAlignment = Enum.TextXAlignment.Right
+			local track = frame(r, UDim2.new(1, -52, 0.5, -12), UDim2.fromOffset(46, 24), WHITE)
+			corner(track, "round")
+			local knob = frame(track, UDim2.new(0, 3, 0.5, -9), UDim2.fromOffset(18, 18), WHITE)
+			corner(knob, "round")
+			switches[trait.Name] = { Track = track, Knob = knob, Text = state }
+
+			r.Activated:Connect(function()
+				local on = not locked[trait.Name]
+				locked[trait.Name] = on or nil -- show it straight away; the server confirms below
+				styleSwitch(trait.Name)
+				task.spawn(function()
+					local ok, res = pcall(function()
+						return inventoryRemote:InvokeServer("TraitLock", trait.Name, on)
+					end)
+					if not ok or type(res) ~= "table" or not res.Success then
+						locked[trait.Name] = (not on) or nil -- didn't save: put it back
+						styleSwitch(trait.Name)
+						lockNote.Text = (ok and type(res) == "table" and res.Error) or "Couldn't reach the server. Try again."
+						lockNote.TextColor3 = ERROR_COLOR
+					end
+				end)
+			end)
+		end
+	end
+end
+
+local function readLocks()
+	locked = {}
+	for traitNameText in string.gmatch(player:GetAttribute("TraitLocks") or "", "[^,]+") do
+		locked[traitNameText] = true
+	end
+	for traitNameText in pairs(switches) do
+		styleSwitch(traitNameText)
+	end
+end
+readLocks()
+
+lockBtn.Activated:Connect(function()
+	lockNote.Text = "Lock the traits you want to keep. Summoning over a locked trait asks you first."
+	lockNote.TextColor3 = SUBTLE
+	lockWin.Visible = true
+end)
+lockClose.Activated:Connect(function() lockWin.Visible = false end)
+
+-- ===== "Are you sure you want to roll?" popup =====
+local confirm = frame(window, UDim2.fromScale(0, 0), UDim2.fromScale(1, 1), BLACK, 0.45)
+confirm.Active = true
+confirm.ZIndex = 20
+confirm.Visible = false
+corner(confirm, 18)
+local confirmCard = frame(confirm, UDim2.new(0.5, -190, 0.5, -95), UDim2.fromOffset(380, 190), WHITE)
+corner(confirmCard, 16)
+gradient(confirmCard, { Color3.fromRGB(40, 26, 20), Color3.fromRGB(40, 16, 44) }, 135)
+stroke(confirmCard, GOLD, 2)
+label(confirmCard, "ARE YOU SURE YOU WANT TO ROLL?", UDim2.fromOffset(16, 16), UDim2.new(1, -32, 0, 26), 19, GOLD, Enum.Font.GothamBlack)
+local confirmText = label(confirmCard, "", UDim2.fromOffset(20, 48), UDim2.new(1, -40, 0, 56), 14, WHITE, Enum.Font.Gotham)
+local function confirmButton(text, x, a, b)
+	local btn = Instance.new("TextButton")
+	btn.Position = UDim2.new(x, x == 0 and 20 or 6, 1, -66)
+	btn.Size = UDim2.new(0.5, -26, 0, 46)
+	btn.Text = text
+	btn.Font = Enum.Font.GothamBlack
+	btn.TextSize = 17
+	btn.TextColor3 = WHITE
+	btn.BackgroundColor3 = WHITE
+	btn.Parent = confirmCard
+	corner(btn, 12)
+	gradient(btn, { a, b }, 0)
+	return btn
+end
+local confirmNo = confirmButton("CANCEL", 0, Color3.fromRGB(70, 78, 100), Color3.fromRGB(60, 64, 88))
+local confirmYes = confirmButton("ROLL", 0.5, Color3.fromRGB(220, 100, 60), Color3.fromRGB(200, 50, 100))
+
 -- ===== State =====
 local selected = nil     -- the picked unit's id
-local confirming = false -- true after one click on Summon over a Legendary or Mythic trait
 local busy = false       -- waiting on the server or playing the roulette
 local ringColor = TEAL   -- the circle's current color (follows the trait's tier)
 local spinSpeed = 40     -- degrees per second; the roulette speeds it up
@@ -449,9 +593,14 @@ local function currentTrait()
 	return u and TraitData.Get(u.Trait) or nil
 end
 
--- Legendary and Mythic traits ask before being replaced
+-- Legendary and Mythic traits get the big landing
 local function isPrecious(trait)
 	return trait ~= nil and (trait.Tier == "Legendary" or trait.Tier == "Mythic")
+end
+
+-- Traits switched on in TRAIT LOCK ask before being replaced
+local function isLocked(trait)
+	return trait ~= nil and locked[trait.Name] == true
 end
 
 local function setRingColor(color)
@@ -514,17 +663,13 @@ local function refreshSummonButton()
 		summonText.Text = "PICK A UNIT"
 		summonSub.Text = "Choose one on the left"
 		summonGradient.Color = ColorSequence.new(Color3.fromRGB(70, 78, 100), Color3.fromRGB(60, 64, 88))
-	elseif confirming and trait then
-		summonText.Text = "REPLACE " .. string.upper(trait.Name) .. "?"
-		summonSub.Text = "Click again to summon anyway"
-		summonGradient.Color = ColorSequence.new(Color3.fromRGB(220, 100, 60), Color3.fromRGB(200, 50, 100))
 	elseif shards() < TraitData.SummonCost then
 		summonText.Text = "SUMMON TRAIT"
 		summonSub.Text = "Out of Trait Shards. Win levels to earn more"
 		summonGradient.Color = ColorSequence.new(Color3.fromRGB(70, 78, 100), Color3.fromRGB(60, 64, 88))
 	else
 		summonText.Text = "SUMMON TRAIT"
-		summonSub.Text = shardText(TraitData.SummonCost)
+		summonSub.Text = shardText(TraitData.SummonCost) .. (isLocked(trait) and "  ·  locked trait, asks first" or "")
 		summonGradient.Color = ColorSequence.new(TEAL, PURPLE)
 	end
 end
@@ -546,9 +691,9 @@ local function refreshPicked()
 		unitName.Text = u and u.Name or ""
 		unitRarity.Text = u and string.format("%s  ·  Lv %d %s", rarityName, ProgressData.LevelFromXP(u.XP), string.rep("★", u.Stars)) or ""
 		unitRarity.TextColor3 = UnitData.RarityColor[rarityName] or SUBTLE
-		traitCaption.Text = "CURRENT TRAIT"
+		traitCaption.Text = isLocked(currentTrait()) and "CURRENT TRAIT  ·  LOCKED" or "CURRENT TRAIT"
 	end
-	traitCaption.TextColor3 = SUBTLE
+	traitCaption.TextColor3 = isLocked(currentTrait()) and GOLD or SUBTLE
 	showTrait(currentTrait())
 	refreshSummonButton()
 end
@@ -604,7 +749,6 @@ local function createRow(u, rarity)
 	r.Activated:Connect(function()
 		if busy then return end
 		selected = row.Id
-		confirming = false
 		setMessage("")
 		for _, other in pairs(rows) do
 			styleRow(other)
@@ -650,7 +794,6 @@ refreshUnits = function()
 	local list, byId = readUnits()
 	if selected and not byId[selected] then
 		selected = nil -- deleted or fused away
-		confirming = false
 	end
 
 	local withTrait = 0
@@ -728,25 +871,8 @@ local function roulette(result)
 	end
 end
 
-summonBtn.Activated:Connect(function()
-	if busy then return end
-	if not selected then
-		setMessage("Pick one of your units on the left first.", ERROR_COLOR)
-		return
-	end
-	if shards() < TraitData.SummonCost then
-		setMessage("You're out of Trait Shards. Win levels to earn more.", ERROR_COLOR)
-		return
-	end
-	-- don't throw away a great trait by accident
-	if isPrecious(currentTrait()) and not confirming then
-		confirming = true
-		refreshSummonButton()
-		setMessage("This replaces the unit's " .. currentTrait().Name .. " trait for good.", GOLD)
-		return
-	end
-	confirming = false
-
+local function summon()
+	if busy or not selected then return end
 	busy = true
 	setMessage("")
 	refreshSummonButton()
@@ -768,6 +894,36 @@ summonBtn.Activated:Connect(function()
 	refreshUnits()
 	refreshSummonButton()
 	shardLabel.Text = shardText(shards())
+end
+
+summonBtn.Activated:Connect(function()
+	if busy then return end
+	if not selected then
+		setMessage("Pick one of your units on the left first.", ERROR_COLOR)
+		return
+	end
+	if shards() < TraitData.SummonCost then
+		setMessage("You're out of Trait Shards. Win levels to earn more.", ERROR_COLOR)
+		return
+	end
+	-- a locked trait asks first, so it isn't thrown away by accident
+	local trait = currentTrait()
+	if isLocked(trait) then
+		local u = selectedUnit()
+		confirmText.Text = string.format("%s has %s, which you locked. Rolling replaces it for good.",
+			u and u.Name or "This unit", trait.Name)
+		confirm.Visible = true
+		return
+	end
+	summon()
+end)
+
+confirmNo.Activated:Connect(function()
+	confirm.Visible = false
+end)
+confirmYes.Activated:Connect(function()
+	confirm.Visible = false
+	summon()
 end)
 
 close.Activated:Connect(function()
@@ -793,6 +949,10 @@ end
 for _, attribute in ipairs({ "Units", "Shards" }) do
 	player:GetAttributeChangedSignal(attribute):Connect(scheduleRefresh)
 end
+player:GetAttributeChangedSignal("TraitLocks"):Connect(function()
+	readLocks()
+	scheduleRefresh()
+end)
 refreshUnits()
 refreshPicked()
 
@@ -847,9 +1007,10 @@ task.spawn(function()
 				and rel.Y > -2 and rel.Y < 8
 		end
 		if inside and not wasIn then
-			confirming = false
 			setMessage("")
 			odds.Visible = false
+			lockWin.Visible = false
+			confirm.Visible = false
 			if not busy then
 				refreshUnits()
 				refreshPicked()

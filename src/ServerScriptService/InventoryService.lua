@@ -1,8 +1,7 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: InventoryService
--- (replaces the earlier version: nothing can change while you're teleporting to or from a
---  match, since your data has already been saved and handed over to the other server)
+-- (replaces the earlier version: adds "TraitLock", for the Traits Cave's trait locks)
 -- Handles every button in the inventory and the Traits Cave. The server checks everything,
 -- so a locked unit can never be deleted by a hacked client.
 
@@ -22,6 +21,7 @@ remote.Parent = ReplicatedStorage
 --   "AutoEquip",   true/false
 --   "AutoDelete",  rarityName, true/false
 --   "SummonTrait", unitId                   (Traits Cave: replaces the unit's trait, costs Trait Shards)
+--   "TraitLock",   traitName,  true/false   (Traits Cave: ask before summoning over this trait)
 --   "Fuse",        targetId,   { unitId, ... }   (feeds those units in for XP)
 --   "Evolve",      unitId                   (uses spare copies + Gold, see ProgressData)
 --   "SaveLayout",  { [element] = { X, Y, S } }  (Screen Layout panel, see LayoutUI)
@@ -77,6 +77,9 @@ remote.OnServerInvoke = function(player, action, a, b)
 		ok, err = PlayerData.SetAutoDelete(player, a, b == true)
 	elseif action == "SummonTrait" then
 		ok, err, trait = PlayerData.SummonTrait(player, a)
+	elseif action == "TraitLock" then
+		if typeof(a) ~= "string" then return { Success = false, Error = "Bad request." } end
+		ok, err = PlayerData.SetTraitLock(player, a, b == true)
 	elseif action == "Fuse" then
 		local ids = idList(b)
 		if not ids then return { Success = false, Error = "Bad request." } end

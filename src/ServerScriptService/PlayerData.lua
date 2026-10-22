@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: ModuleScript
 -- NAME: PlayerData
--- (replaces the earlier version: admins (PlaceConfig.Admins) get the slots from every slot
---  pass without buying them)
+-- (replaces the earlier version: saves your trait locks: the traits the Traits Cave asks
+--  about before you summon over them)
 -- Session lock for the lobby <-> match server teleports: a server marks a player's save as
 -- "in use" while they're on it, and lets go of it (PlayerData.Release) when they leave or
 -- teleport. A server that loads a player still marked as in use by another server waits up
@@ -118,6 +118,19 @@ end
 --   UILayout   [element] = { X, Y, S }: how far each screen element is moved (fractions of
 --              the screen) and its size, set in the Screen Layout panel (see LayoutUI)
 --   Settings   [name] = true/false from the Settings popup (see PlayerData.SettingDefaults)
+--   TraitLocks [traitName] = true: the Traits Cave asks "are you sure?" before summoning over
+--              that trait (a new player starts with every Legendary and Mythic trait locked)
+
+-- The trait locks a new player starts with: every Legendary and Mythic trait
+local function defaultTraitLocks()
+	local locks = {}
+	for _, trait in ipairs(TraitData.Traits) do
+		if trait.Tier == "Legendary" or trait.Tier == "Mythic" then
+			locks[trait.Name] = true
+		end
+	end
+	return locks
+end
 
 -- ===== Units =====
 local function newUnit(profile, unitName)
@@ -280,6 +293,13 @@ function PlayerData.Sync(player)
 	end
 	table.sort(autoDelete)
 	player:SetAttribute("AutoDelete", table.concat(autoDelete, ",")) -- "Common,Rare"
+
+	local traitLocks = {}
+	for traitName in pairs(profile.TraitLocks) do
+		table.insert(traitLocks, traitName)
+	end
+	table.sort(traitLocks)
+	player:SetAttribute("TraitLocks", table.concat(traitLocks, ",")) -- "Lord,Midas"
 
 	local cleared = {}
 	for id in pairs(profile.Cleared) do
@@ -467,6 +487,7 @@ function PlayerData.Load(player)
 		Equipped = {},
 		AutoEquip = true,
 		AutoDelete = {},
+		TraitLocks = defaultTraitLocks(),
 		Cleared = {},
 		BonusSlots = 0,
 		PassSlots = 0,
@@ -503,6 +524,15 @@ function PlayerData.Load(player)
 			for rarityName, v in pairs(saved.AutoDelete) do
 				if v == true and UnitData.RarityColor[rarityName] then
 					profile.AutoDelete[rarityName] = true
+				end
+			end
+		end
+		-- (saves from before trait locks keep the defaults)
+		if type(saved.TraitLocks) == "table" then
+			profile.TraitLocks = {}
+			for _, traitName in ipairs(saved.TraitLocks) do
+				if TraitData.Get(traitName) then
+					profile.TraitLocks[traitName] = true
 				end
 			end
 		end
@@ -570,6 +600,11 @@ function PlayerData.Save(player, release)
 				table.insert(clearedList, id)
 			end
 			table.sort(clearedList)
+			local traitLockList = {}
+			for traitName in pairs(profile.TraitLocks) do
+				table.insert(traitLockList, traitName)
+			end
+			table.sort(traitLockList)
 
 			return {
 				Version = SAVE_VERSION,
@@ -582,6 +617,7 @@ function PlayerData.Save(player, release)
 				Equipped = table.clone(profile.Equipped),
 				AutoEquip = profile.AutoEquip,
 				AutoDelete = table.clone(profile.AutoDelete),
+				TraitLocks = traitLockList,
 				Cleared = clearedList,
 				BonusSlots = profile.BonusSlots,
 				UILayout = profile.UILayout,
@@ -855,6 +891,18 @@ function PlayerData.SetAutoDelete(player, rarityName, on)
 	if not UnitData.RarityColor[rarityName] then return false, "Unknown rarity." end
 
 	profile.AutoDelete[rarityName] = on and true or nil
+	PlayerData.Sync(player)
+	PlayerData.RequestSave(player)
+	return true
+end
+
+-- Locks or unlocks a trait: the Traits Cave asks before summoning over a locked one
+function PlayerData.SetTraitLock(player, traitName, on)
+	local profile = PlayerData.Profiles[player]
+	if not profile then return false, "Still loading." end
+	if not TraitData.Get(traitName) then return false, "Unknown trait." end
+
+	profile.TraitLocks[traitName] = on and true or nil
 	PlayerData.Sync(player)
 	PlayerData.RequestSave(player)
 	return true
