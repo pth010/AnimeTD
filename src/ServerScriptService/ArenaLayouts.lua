@@ -1,12 +1,13 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: ModuleScript
 -- NAME: ArenaLayouts
--- (replaces the earlier version: the golem in GolemDen stands on a square of path instead of
---  a long strip, using the new PathSquare option)
+-- (replaces the earlier version: Forest Outskirts (Classic) is remade: no more cottages in the
+--  middle, six raised high-ground plateaus between the bends of the path, and a few houses
+--  round the edges, each turned its own way. Houses can face any way now: { x, z, facing })
 -- Every map has its own layout: its own route for the enemies, its own raised
 -- land (plateaus with cliffs, some of them high ground), hills, buildings and trees. Each map
 -- in LevelData picks one with Layout:
---   Classic     the original flat valley with one hill                      (Forest Outskirts)
+--   Classic     a green valley with high ground between the bends of the path (Forest Outskirts)
 --   Crossroads  a raised village square the path crosses, a watchtower bluff (Haunted Village)
 --   Switchback  the path climbs a two-step mountainside and comes back down  (Demon Mountain)
 --   Islands     islands of rock at different heights                        (Abyss Gate)
@@ -30,7 +31,8 @@
 --             can sit on top of each other (the Temple's terraces).
 --   Hills     the stepped little mountains with high ground on top: { x, z } (30 x 30, on the
 --             ground)
---   Houses    { x, z } (16 x 14 blocks; the theme draws the building), Trees { x, z } (7 wide)
+--   Houses    { x, z } or { x, z, facing } (16 x 14 blocks; the theme draws the building, its
+--             front turned `facing` degrees round from +Z), Trees { x, z } (7 wide)
 --   Spawn     { x, z }: where the team appears
 --   Blocks    (optional) { x, z, sizeX, sizeZ }: invisible spots nothing can be built on
 --   NoMarkers (optional) true: no enemies' gate or base at the ends of the path
@@ -52,18 +54,32 @@ local DIRT = Color3.fromRGB(135, 110, 80)
 
 ArenaLayouts.Layouts = {
 	-- Forest Outskirts. The original flat valley with one hill.
+	-- Forest Outskirts. The path winds through a green valley; every pocket between its bends is
+	-- a raised plateau of high ground (+30% range), with the hill in the middle. A few cottages
+	-- stand round the edges, each turned its own way.
 	Classic = {
 		Path = {
 			{ -140, -80, 0 }, { -140, -50, 0 }, { -60, -50, 0 }, { -60, 0, 0 }, { -120, 0, 0 }, { -120, 50, 0 },
 			{ 20, 50, 0 }, { 20, -30, 0 }, { 80, -30, 0 }, { 80, 40, 0 }, { 140, 40, 0 }, { 140, 85, 0 },
 		},
-		Plateaus = {},
-		Hills = { { 0, 30 } },
-		Houses = { { -105, -82 }, { -100, -25 }, { -140, 35 }, { -92, 24 }, { -80, 82 }, { -30, 80 }, { 50, 2 }, { 48, 72 }, { 112, -12 }, { 112, -72 } },
+		Plateaus = {
+			{ X = -98, Z = -25, SizeX = 46, SizeZ = 30, Height = 6, High = true },  -- inside the first bend
+			{ X = -52, Z = 26, SizeX = 48, SizeZ = 26, Height = 5, High = true },   -- the long middle stretch
+			{ X = -100, Z = 26, SizeX = 18, SizeZ = 26, Height = 7, High = true },  -- a tall little bluff
+			{ X = 50, Z = 10, SizeX = 40, SizeZ = 48, Height = 6, High = true },    -- inside the big U
+			{ X = 40, Z = -74, SizeX = 60, SizeZ = 30, Height = 5, High = true },   -- the south ridge
+			{ X = 115, Z = -22, SizeX = 36, SizeZ = 40, Height = 7, High = true },  -- by the last bend
+			{ X = -60, Z = 80, SizeX = 52, SizeZ = 24, Height = 5, High = true },   -- along the north edge
+		},
+		Hills = { { 0, 28 } },
+		Houses = {
+			{ -135, -20, 90 }, { -138, 78, 200 }, { -15, 84, 160 }, { 58, 80, 30 },
+			{ 110, 68, -120 }, { 125, -82, 300 }, { -100, -86, 15 },
+		},
 		Trees = {
-			{ -130, -92 }, { -60, -92 }, { -30, -70 }, { -30, -25 }, { -5, -75 }, { 25, -65 }, { 60, -80 }, { 130, -90 },
-			{ 128, 5 }, { 100, 20 }, { 66, 30 }, { -45, 22 }, { -35, 64 }, { 8, 72 }, { -112, 62 }, { -145, -30 },
-			{ 120, 62 },
+			{ -51, -66 }, { 10, -26 }, { -125, -78 }, { -22, 62 }, { 37, 85 }, { -56, 60 }, { -14, -38 }, { 7, 71 },
+			{ 67, -40 }, { 139, -73 }, { -134, 32 }, { 99, 84 }, { 93, 69 }, { 26, -45 }, { 116, 53 }, { -84, -64 },
+			{ -46, -85 },
 		},
 		Spawn = { -30, -20 },
 	},
@@ -376,7 +392,8 @@ function ArenaLayouts.Build(arena, name)
 	-- height they stand at.
 	for n, h in ipairs(layout.Houses) do
 		local floor = heightAt(layout, h[1], h[2])
-		local block = makePart(obstacles, "House" .. n, Vector3.new(16, 9.5, 14), CFrame.new(at(h[1], floor + 4.75, h[2])), WHITE)
+		local turn = CFrame.Angles(0, math.rad(h[3] or 0), 0) -- (the theme builds the house turned the same way)
+		local block = makePart(obstacles, "House" .. n, Vector3.new(16, 9.5, 14), CFrame.new(at(h[1], floor + 4.75, h[2])) * turn, WHITE)
 		block.Transparency = 1
 		block:SetAttribute("Floor", origin.Y + floor)
 	end
