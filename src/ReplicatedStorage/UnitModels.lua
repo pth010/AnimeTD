@@ -1,8 +1,8 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: UnitModels
--- (replaces the earlier version: the Eclipse Emperor has a signature attack, "Eclipse": he
---  raises his sword over his head and slams it down on the enemy)
+-- (replaces the earlier version: the Eclipse Emperor's attack lands a moment later (0.4s), as
+--  he first stabs his sword up into the eclipse before slamming it down)
 -- Builds the character model for each unit out of parts (no uploaded assets needed).
 -- Every unit has a "look" below. Change them freely.
 --
@@ -1028,8 +1028,8 @@ UnitModels.Signatures = {
 -- How long into the attack animation each attack lands its blow or lets its shot go (seconds at 1x)
 UnitModels.HitDelay = { Slash = 0.12, DualSlash = 0.06, Thrust = 0.1, Cast = 0.12, Shoot = 0.2, Starfall = 0.15, Phoenix = 0.1, Eclipse = 0.05 }
 -- A moment more some effects take before the shot goes (the star charging, the arrow catching fire)
--- (the Eclipse Emperor's is his sword going up over his head before it comes down)
-UnitModels.Windup = { Starfall = 0.075, Phoenix = 0.15, Eclipse = 0.3 }
+-- (the Eclipse Emperor's is his sword going up into the eclipse before it comes down)
+UnitModels.Windup = { Starfall = 0.075, Phoenix = 0.15, Eclipse = 0.35 }
 -- Shots that fly to the enemy: { studs per second, shortest flight, longest flight }
 local FLIGHTS = { Cast = { 120, 0.08, 0.25 }, Shoot = { 140, 0.06, 0.2 }, Phoenix = { 90, 0.12, 0.3 } }
 

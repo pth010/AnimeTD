@@ -1,8 +1,8 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: Animations
--- (replaces the earlier version: the eclipse over the Eclipse Emperor floats a head's height
---  higher)
+-- (replaces the earlier version: the Eclipse Emperor thrusts his sword straight up into the
+--  eclipse, then slams it down; the eclipse collapses and streaks down after the blade)
 -- Every attack shows an effect that suits the weapon: slash crescents for swords, a magic
 -- circle and a bursting orb for mages, a streak and shockwave for lances, glowing arrows for
 -- bows (see ATTACK EFFECTS below). Special units can have a signature attack of their own
@@ -18,8 +18,8 @@
 --       Cast       staffs: raise the staff high, then point it at the enemy
 --       Starfall   Starfall Kitsune: spin the staff round, aim it like a wand, fire, recoil
 --       Phoenix    Phoenix Archer: raise the bow, rise up on her wings while drawing, loose
---       Eclipse    Eclipse Emperor: leap up with the sword raised over his head in both
---                  hands, then slam it down on the enemy
+--       Eclipse    Eclipse Emperor: leap up and thrust the sword straight up into the eclipse
+--                  over his head, then slam it down on the enemy
 --       Shoot      bows: hold the bow out, draw and let go
 --       Farm       cash units don't attack; they fan or toss a coin each time they pay, and a
 --                  gold bar over them fills up to the next payout
@@ -116,19 +116,20 @@ local ATTACKS = {
 		Lunge = { { 0, 0 }, { 0.48, -0.35 }, { 0.55, 0.3 }, { 0.7, 0 }, { 1, 0 } },
 		Rise = { { 0, 0 }, { 0.45, 0.7 }, { 0.6, 0.8 }, { 1, 0 } },
 	},
-	-- Eclipse Emperor's signature: he leaps up and leans back, raising the sword high over his
-	-- head in both hands so the blade hangs down behind him, then slams it down (at 0.5 of the
-	-- way through, 0.35s in, which is when the blow lands: HitDelay + Windup in UnitModels):
-	-- his arms come down in front and the sword turns in his hand (Grip, see SWORD_GRIP in
-	-- UnitModels) so the blade chops forward and down onto the enemy. He lunges forward and
-	-- lands hard, holds the blade down on the enemy, and straightens up. (Fits his 2s cooldown.)
+	-- Eclipse Emperor's signature: he leaps up and thrusts the sword straight up over his head,
+	-- the blade turned in his hand to point at the sky (Grip, see SWORD_GRIP in UnitModels), so
+	-- it stabs into the eclipse floating there, and holds it there a moment. Then he slams it
+	-- down (at 0.5 of the way through, 0.4s in, which is when the blow lands: HitDelay + Windup
+	-- in UnitModels): his arms come down in front and the blade chops forward and down onto the
+	-- enemy. He lunges forward and lands hard, holds the blade down on the enemy, and
+	-- straightens up. (Fits his 2s cooldown.)
 	Eclipse = {
-		Time = 0.7,
-		ArmR = { { 0, 0 }, { 0.3, 150 }, { 0.43, 178 }, { 0.5, 75 }, { 0.75, 75 }, { 1, 0 } },
-		ArmL = { { 0, 0 }, { 0.3, 140 }, { 0.43, 168 }, { 0.5, 70 }, { 0.75, 70 }, { 1, 0 } },
-		Grip = { { 0, 0 }, { 0.43, 0 }, { 0.5, -150 }, { 0.75, -150 }, { 1, 0 } },
-		Lunge = { { 0, 0 }, { 0.43, -0.4 }, { 0.5, 1.0 }, { 0.75, 1.0 }, { 1, 0 } },
-		Rise = { { 0, 0 }, { 0.3, 0.6 }, { 0.43, 0.8 }, { 0.5, 0 }, { 1, 0 } },
+		Time = 0.8,
+		ArmR = { { 0, 0 }, { 0.35, 180 }, { 0.44, 180 }, { 0.5, 75 }, { 0.75, 75 }, { 1, 0 } },
+		ArmL = { { 0, 0 }, { 0.35, 172 }, { 0.44, 172 }, { 0.5, 70 }, { 0.75, 70 }, { 1, 0 } },
+		Grip = { { 0, 0 }, { 0.35, -145 }, { 0.44, -145 }, { 0.5, -150 }, { 0.75, -150 }, { 1, 0 } },
+		Lunge = { { 0, 0 }, { 0.35, -0.2 }, { 0.44, -0.3 }, { 0.5, 1.0 }, { 0.75, 1.0 }, { 1, 0 } },
+		Rise = { { 0, 0 }, { 0.35, 0.8 }, { 0.44, 0.9 }, { 0.5, 0 }, { 1, 0 } },
 	},
 }
 local ATTACK_TIME = 0.4  -- seconds an attack takes at 1x (unless its pose has its own Time)
@@ -352,8 +353,9 @@ end
 --              arrow, then she looses a phoenix of fire: it flies at the enemy in an arc,
 --              flapping its wings, trailing flame and dropping embers, and bursts into a
 --              fireball, a ring of fire across the floor, feathers flying out and rising embers
---   Eclipse    as he raises the sword, an eclipse (a black sun ringed in crimson) rises behind
---              his head and red energy streams into the blade, which glows. When it comes down:
+--   Eclipse    an eclipse (a black sun ringed in crimson) swells over his head, red energy
+--              streams into the blade, which glows, and he stabs the blade up into the eclipse,
+--              which flares. When it comes down the eclipse collapses and streaks after it:
 --              a crimson slash straight down through the enemy, a dark blast with a white
 --              flash, a black sun burned into the ground, shockwaves, cracks running out across
 --              the floor, and rubble and red sparks thrown up
@@ -605,20 +607,41 @@ local ECL_RUBBLE = Color3.fromRGB(70, 60, 70)
 
 function EFFECTS.Eclipse(hitbox, target, _, speed)
 	local blade = hitbox:FindFirstChild("Blade", true)
-	local top = hitbox.Position + Vector3.new(0, hitbox.Size.Y / 2 + 5.8, 0) -- (a head's height clear of him)
+	-- The eclipse floats where the tip of his sword ends up when he thrusts it straight up
+	-- (over his sword hand, about 10 studs up at level 1; models grow a little every level)
+	local model = hitbox:FindFirstChildWhichIsA("Model")
+	local root = model and model.PrimaryPart
+	local scale = model and model:GetScale() or 1
+	local turn = root and root.CFrame.Rotation or CFrame.new()
+	local feet = hitbox.Position - Vector3.new(0, hitbox.Size.Y / 2, 0)
+	local top = feet + turn * (Vector3.new(1.5, 10.3, 0.15) * scale)
+	local pierce = 0.23 -- seconds after this starts that the blade reaches it
 
-	-- 1. the windup: an eclipse rises behind his head, turned to face your camera: a black sun
-	-- with a crimson ring that swells, then fades as the sword comes down
+	-- 1. the windup: the eclipse swells over his head, turned to face your camera: a black sun
+	-- with crimson rings
 	local toCamera = CFrame.lookAt(top, camera.CFrame.Position)
 	local sun = fxPart(Vector3.new(0.4, 0.4, 0.4), toCamera, ECL_DARK, Enum.PartType.Ball)
 	sun.Material = Enum.Material.SmoothPlastic
-	TweenService:Create(sun, TweenInfo.new(WINDUP.Eclipse / speed, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+	TweenService:Create(sun, TweenInfo.new(pierce / speed, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
 		{ Size = Vector3.new(4.2, 4.2, 4.2) }):Play()
-	task.delay(WINDUP.Eclipse / speed, function()
-		fade(sun, 0.3 / speed, { Size = Vector3.new(5, 5, 5) })
+	ring(toCamera * CFrame.new(0, 0, 0.3), 2.3, 0.9, ECL_RED, (WINDUP.Eclipse + 0.2) / speed, 22)
+	ring(toCamera * CFrame.new(0, 0, 0.35) * CFrame.Angles(0, 0, R(8)), 2.6, 1.2, ECL_BLOOD, (WINDUP.Eclipse + 0.25) / speed, 22)
+	-- the blade stabs into it: it flares
+	task.delay(pierce / speed, function()
+		local flare = fxPart(Vector3.new(3, 3, 3), CFrame.new(top), ECL_RED, Enum.PartType.Ball)
+		flare.Transparency = 0.3
+		fade(flare, 0.25 / speed, { Size = Vector3.new(6.5, 6.5, 6.5) })
+		ring(toCamera * CFrame.new(0, 0, 0.4), 2.2, 2.5, WHITE_HOT, 0.25 / speed, 18)
+		sparks(top, ECL_RED, 8, 3.5, 0.3 / speed)
 	end)
-	ring(toCamera * CFrame.new(0, 0, 0.3), 2.3, 0.9, ECL_RED, (WINDUP.Eclipse + 0.3) / speed, 22)
-	ring(toCamera * CFrame.new(0, 0, 0.35) * CFrame.Angles(0, 0, R(8)), 2.6, 1.2, ECL_BLOOD, (WINDUP.Eclipse + 0.35) / speed, 22)
+	-- as the sword comes down, the eclipse collapses and streaks down after it
+	task.delay(WINDUP.Eclipse / speed, function()
+		fade(sun, 0.15 / speed, { Size = Vector3.new(0.3, 0.3, 0.3) })
+		for _, layer in ipairs({ { 1.2, ECL_RED, 0.25 }, { 0.45, WHITE_HOT, 0.18 } }) do
+			local streak = beamPart(top, target, layer[1], layer[2])
+			fade(streak, layer[3] / speed, { Size = Vector3.new(streak.Size.X, 0.05, 0.05) })
+		end
+	end)
 	local corona = Instance.new("PointLight")
 	corona.Color = ECL_RED
 	corona.Range = 18
