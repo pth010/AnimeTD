@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: ModuleScript
 -- NAME: ArenaLayouts
--- (replaces the earlier version: adds GolemDen, the Damage Challenge's cavern, and two layout
---  options: Blocks (spots nothing can be built on) and NoMarkers (no gate or base))
+-- (replaces the earlier version: the golem in GolemDen stands on a square of path instead of
+--  a long strip, using the new PathSquare option)
 -- Every map has its own layout: its own route for the enemies, its own raised
 -- land (plateaus with cliffs, some of them high ground), hills, buildings and trees. Each map
 -- in LevelData picks one with Layout:
@@ -34,6 +34,8 @@
 --   Spawn     { x, z }: where the team appears
 --   Blocks    (optional) { x, z, sizeX, sizeZ }: invisible spots nothing can be built on
 --   NoMarkers (optional) true: no enemies' gate or base at the ends of the path
+--   PathSquare (optional) a size: draw the path as one square that size around its first
+--             point, instead of a strip along the route (for a boss that stands still)
 -- Nothing can be built on the path, the cliffs, hills, houses or trees. Keep houses and trees
 -- off the path and wholly on one height of land.
 
@@ -193,12 +195,14 @@ ArenaLayouts.Layouts = {
 	},
 
 	-- Damage Challenge. A wide cavern floor. The golem stands at the first point of the "path",
-	-- facing along it, and never moves; the path is only the ground in front of it. Four high
-	-- ledges in the corners (+30% range), crystal formations (the theme's trees) round the edge.
+	-- facing along it (toward the spawn), and never moves; the path is only the square of
+	-- ground it stands on. Four high ledges in the corners (+30% range), crystal formations
+	-- (the theme's trees) round the edge.
 	GolemDen = {
-		Path = { { 0, 25, 0 }, { 0, -5, 0 } },
+		Path = { { 0, 25, 0 }, { 0, 21, 0 } },
+		PathSquare = 20,
 		NoMarkers = true,
-		Blocks = { { 0, 25, 12, 12 } }, -- where the golem stands
+		Blocks = { { 0, 25, 20, 20 } }, -- the golem's square
 		Plateaus = {
 			{ X = -100, Z = -60, SizeX = 44, SizeZ = 34, Height = 7, High = true },
 			{ X = 100, Z = -60, SizeX = 44, SizeZ = 34, Height = 7, High = true },
@@ -324,7 +328,12 @@ function ArenaLayouts.Build(arena, name)
 		local a, b = path[i], path[i + 1]
 		return Vector3.new(b[1] - a[1], 0, b[2] - a[2]).Unit
 	end
-	for i = 1, #path - 1 do
+	if layout.PathSquare then
+		-- one square around the first point
+		local size, p = layout.PathSquare, path[1]
+		makePart(scenery, "PathTile", Vector3.new(size, 0.2, size), CFrame.new(at(p[1], p[3] + 0.1, p[2])), DIRT)
+	end
+	for i = 1, layout.PathSquare and 0 or #path - 1 do
 		local a, b = path[i], path[i + 1]
 		local A, B = at(a[1], a[3] + 0.2, a[2]), at(b[1], b[3] + 0.2, b[2])
 		if not isRamp(i) then

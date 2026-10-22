@@ -1,9 +1,8 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: ArenaThemes
--- (replaces the earlier version: adds the Cave theme for the Damage Challenge: a cavern with
---  rock walls, a ceiling with stalactites and glowing crystals; and NoRoad for themes without
---  the enemies' road)
+-- (replaces the earlier version: the Cave theme (Damage Challenge) is much brighter: stronger
+--  light, lighter stone, thinner fog and brighter ceiling crystals)
 -- The arena is an open place, not a room. Around the build area each theme lays out land to
 -- the horizon, the enemies' road coming in from the wilds, its trees and buildings scattered
 -- about, a ring of distant mountains, a landmark and, at night, a moon in the real sky.
@@ -167,10 +166,10 @@ ArenaThemes.Themes = {
 	},
 
 	Cave = {
-		Ground = rgb(58, 54, 64), GroundMaterial = M.Slate,
-		HighGround = rgb(84, 72, 104), HighGroundMaterial = M.Slate,
-		Path = rgb(72, 66, 76), PathMaterial = M.Cobblestone,
-		Rock = rgb(52, 48, 60), RockMaterial = M.Rock,
+		Ground = rgb(92, 88, 100), GroundMaterial = M.Slate,
+		HighGround = rgb(118, 104, 140), HighGroundMaterial = M.Slate,
+		Path = rgb(112, 104, 116), PathMaterial = M.Cobblestone,
+		Rock = rgb(80, 74, 90), RockMaterial = M.Rock,
 		Gate = rgb(40, 36, 48),
 		Glow = rgb(80, 230, 220), -- crystals
 		House = "Monolith", Roof = rgb(40, 36, 50),
@@ -179,11 +178,11 @@ ArenaThemes.Themes = {
 		Landmark = "Cavern", NoRoad = true,
 		Mountain = "Crystals",
 		OutskirtHouses = 0, OutskirtTrees = 30,
-		Ambience = { "Motes", "Fog" }, FogColor = rgb(70, 80, 100),
+		Ambience = { "Motes", "Fog" }, FogColor = rgb(120, 130, 150),
 		Lighting = {
-			ClockTime = 0, Brightness = 0.6, Ambient = rgb(96, 98, 128), OutdoorAmbient = rgb(84, 88, 118),
-			ExposureCompensation = 0.35, Tint = rgb(215, 230, 245), Saturation = -0.1, Contrast = 0.15,
-			Atmosphere = { Density = 0.35, Offset = 0, Color = rgb(40, 46, 62), Decay = rgb(16, 18, 28), Haze = 2, Glare = 0 },
+			ClockTime = 0, Brightness = 1.5, Ambient = rgb(165, 168, 190), OutdoorAmbient = rgb(150, 155, 180),
+			ExposureCompensation = 0.7, Tint = rgb(230, 238, 250), Saturation = -0.05, Contrast = 0.08,
+			Atmosphere = { Density = 0.18, Offset = 0, Color = rgb(90, 100, 120), Decay = rgb(50, 56, 72), Haze = 0.8, Glare = 0 },
 		},
 	},
 
@@ -771,7 +770,7 @@ function LANDMARKS.Cavern(c, hx, hz, road, t, claim)
 		local x = rng:NextNumber(-wx * 0.8, wx * 0.8)
 		local z = rng:NextNumber(-wz * 0.8, wz * 0.8)
 		local spike = crystalSpike(c * CFrame.new(x, HEIGHT, z) * CFrame.Angles(R(180), 0, 0), 1.6, rng:NextNumber(4, 7), t.Glow)
-		glow(spike, t.Glow, 40, 1)
+		glow(spike, t.Glow, 60, 2)
 	end
 end
 
