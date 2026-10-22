@@ -1,8 +1,8 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: InventoryUI
--- (replaces the earlier version: a unit's effect chips (slow, freeze, bleed) include its trait,
---  so a Catalyst unit shows its stronger effect)
+-- (replaces the earlier version: the fuse window has an "Add all" button that picks every unit
+--  that can be fed, leaving only locked units and your team)
 -- The team bar stays on screen in matches too, as the unit hotbar: click a slot (or press
 -- 1-6) to place that unit; slots show cost and placed/limit.
 -- The team bar runs along the bottom of the screen. In the lobby, "Put on team" asks you to
@@ -915,11 +915,12 @@ local fusePortraitName = nil
 local fuseTitle = label(fuseWin, "", UDim2.fromOffset(78, 10), UDim2.new(1, -140, 0, 26), 20, WHITE, Enum.Font.GothamBlack, Enum.TextXAlignment.Left)
 local fuseInfo = label(fuseWin, "", UDim2.fromOffset(78, 38), UDim2.new(1, -140, 0, 20), 14, Color3.fromRGB(110, 200, 255), Enum.Font.GothamBold, Enum.TextXAlignment.Left)
 local fuseClose = button(fuseWin, "X", UDim2.new(1, -44, 0, 10), UDim2.fromOffset(32, 32), RED, 15)
-local addCommons = button(fuseWin, "Add spare Commons", UDim2.fromOffset(14, 70), UDim2.fromOffset(170, 28), Color3.fromRGB(110, 110, 125), 13)
-local addRares = button(fuseWin, "Add spare Rares", UDim2.fromOffset(190, 70), UDim2.fromOffset(150, 28), Color3.fromRGB(60, 110, 190), 13)
-local clearBtn = button(fuseWin, "Clear", UDim2.fromOffset(346, 70), UDim2.fromOffset(80, 28), GRAY, 13)
+local addAll = button(fuseWin, "Add all", UDim2.fromOffset(14, 70), UDim2.fromOffset(90, 28), Color3.fromRGB(50, 140, 200), 13)
+local addCommons = button(fuseWin, "Add spare Commons", UDim2.fromOffset(110, 70), UDim2.fromOffset(170, 28), Color3.fromRGB(110, 110, 125), 13)
+local addRares = button(fuseWin, "Add spare Rares", UDim2.fromOffset(286, 70), UDim2.fromOffset(150, 28), Color3.fromRGB(60, 110, 190), 13)
+local clearBtn = button(fuseWin, "Clear", UDim2.fromOffset(442, 70), UDim2.fromOffset(80, 28), GRAY, 13)
 label(fuseWin, "Spare = Lv 1, no trait, no stars. Locked units and your team never show here.",
-	UDim2.fromOffset(434, 70), UDim2.new(1, -448, 0, 28), 11, DIM, Enum.Font.Gotham, Enum.TextXAlignment.Left)
+	UDim2.fromOffset(530, 70), UDim2.new(1, -544, 0, 28), 11, DIM, Enum.Font.Gotham, Enum.TextXAlignment.Left)
 
 local fuseList = Instance.new("ScrollingFrame")
 fuseList.Position = UDim2.fromOffset(14, 106)
@@ -1079,6 +1080,16 @@ local function addSpares(rarityName)
 	refreshFuse()
 end
 
+-- every unit that can be fed, whatever its level, trait or stars: only locked units and your
+-- team are left
+addAll.Activated:Connect(function()
+	for _, u in ipairs(units) do
+		if canFeed(u) then
+			fuseSelection[u.Id] = true
+		end
+	end
+	refreshFuse()
+end)
 addCommons.Activated:Connect(function() addSpares("Common") end)
 addRares.Activated:Connect(function() addSpares("Rare") end)
 clearBtn.Activated:Connect(function()
