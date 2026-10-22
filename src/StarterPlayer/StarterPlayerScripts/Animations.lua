@@ -1,8 +1,8 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: Animations
--- (replaces the earlier version: the Eclipse Emperor's signature attack: he leaps up with his
---  sword raised over his head, an eclipse rising behind it, and slams it down on the enemy)
+-- (replaces the earlier version: the Eclipse Emperor's slam has a bigger eclipse and a bolder
+--  slash: three crescents and a glowing cut line through the enemy)
 -- Every attack shows an effect that suits the weapon: slash crescents for swords, a magic
 -- circle and a bursting orb for mages, a streak and shockwave for lances, glowing arrows for
 -- bows (see ATTACK EFFECTS below). Special units can have a signature attack of their own
@@ -605,7 +605,7 @@ local ECL_RUBBLE = Color3.fromRGB(70, 60, 70)
 
 function EFFECTS.Eclipse(hitbox, target, _, speed)
 	local blade = hitbox:FindFirstChild("Blade", true)
-	local top = hitbox.Position + Vector3.new(0, hitbox.Size.Y / 2 + 3.5, 0)
+	local top = hitbox.Position + Vector3.new(0, hitbox.Size.Y / 2 + 4.5, 0)
 
 	-- 1. the windup: an eclipse rises behind his head, turned to face your camera: a black sun
 	-- with a crimson ring that swells, then fades as the sword comes down
@@ -613,14 +613,15 @@ function EFFECTS.Eclipse(hitbox, target, _, speed)
 	local sun = fxPart(Vector3.new(0.4, 0.4, 0.4), toCamera, ECL_DARK, Enum.PartType.Ball)
 	sun.Material = Enum.Material.SmoothPlastic
 	TweenService:Create(sun, TweenInfo.new(WINDUP.Eclipse / speed, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-		{ Size = Vector3.new(2.6, 2.6, 2.6) }):Play()
+		{ Size = Vector3.new(4.2, 4.2, 4.2) }):Play()
 	task.delay(WINDUP.Eclipse / speed, function()
-		fade(sun, 0.25 / speed, { Size = Vector3.new(3.2, 3.2, 3.2) })
+		fade(sun, 0.3 / speed, { Size = Vector3.new(5, 5, 5) })
 	end)
-	ring(toCamera * CFrame.new(0, 0, 0.3), 1.45, 0.6, ECL_RED, (WINDUP.Eclipse + 0.25) / speed, 16)
+	ring(toCamera * CFrame.new(0, 0, 0.3), 2.3, 0.9, ECL_RED, (WINDUP.Eclipse + 0.3) / speed, 22)
+	ring(toCamera * CFrame.new(0, 0, 0.35) * CFrame.Angles(0, 0, R(8)), 2.6, 1.2, ECL_BLOOD, (WINDUP.Eclipse + 0.35) / speed, 22)
 	local corona = Instance.new("PointLight")
 	corona.Color = ECL_RED
-	corona.Range = 12
+	corona.Range = 18
 	corona.Brightness = 3
 	corona.Parent = sun
 
@@ -644,8 +645,18 @@ function EFFECTS.Eclipse(hitbox, target, _, speed)
 	task.wait(WINDUP.Eclipse / speed)
 	if not hitbox.Parent then return end
 	local facing = CFrame.lookAt(hitbox.Position, Vector3.new(target.X, hitbox.Position.Y, target.Z)).Rotation
-	-- a crimson slash straight down through the enemy (a crescent stood on end)
-	crescent(target + Vector3.new(0, 0.5, 0), facing, ECL_RED, 90, 3.8, 0.35 / speed)
+	-- a big crimson slash straight down through the enemy: three crescents stood on end (dark
+	-- red outside, crimson, a white-hot inside) and the cut itself, a glowing line from above
+	-- down into the ground
+	local slashAt = target + Vector3.new(0, 0.5, 0)
+	crescent(slashAt, facing, ECL_BLOOD, 90, 5.6, 0.55 / speed)
+	crescent(slashAt, facing, ECL_RED, 90, 5, 0.5 / speed)
+	crescent(slashAt, facing, WHITE_HOT, 90, 4.3, 0.3 / speed)
+	local cutTop, cutBottom = target + Vector3.new(0, 6, 0), groundBelow(hitbox, target)
+	for _, layer in ipairs({ { 0.9, ECL_RED, 0.45 }, { 0.35, WHITE_HOT, 0.3 } }) do
+		local cut = beamPart(cutTop, cutBottom, layer[1], layer[2])
+		fade(cut, layer[3] / speed, { Size = Vector3.new(cut.Size.X, 0.05, 0.05) })
+	end
 	-- a dark blast with a white flash in it
 	local flash = fxPart(Vector3.new(1, 1, 1), CFrame.new(target), WHITE_HOT, Enum.PartType.Ball)
 	fade(flash, 0.12 / speed, { Size = Vector3.new(5, 5, 5) })
