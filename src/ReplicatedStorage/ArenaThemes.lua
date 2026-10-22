@@ -1,8 +1,8 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: ArenaThemes
--- (replaces the earlier version: houses in the arena face whichever way their block in the
---  layout is turned, so a map's houses can look in different directions)
+-- (replaces the earlier version: trees stand up again (the last version tipped them over when it
+--  let houses face different directions))
 -- The arena is an open place, not a room. Around the build area each theme lays out land to
 -- the horizon, the enemies' road coming in from the wilds, its trees and buildings scattered
 -- about, a ring of distant mountains, a landmark and, at night, a moon in the real sky.
@@ -1143,12 +1143,13 @@ function ArenaThemes.Apply(arena, themeName)
 		local tree = TREES[t.Tree] or TREES.Round
 		for _, p in ipairs(obstacles:GetChildren()) do
 			-- (houses and trees on a plateau stand at its height)
-			-- (turned the way its block is, so houses can face different ways)
-			local spot = CFrame.new(p.Position.X, p:GetAttribute("Floor") or groundY, p.Position.Z) * p.CFrame.Rotation
+			local spot = CFrame.new(p.Position.X, p:GetAttribute("Floor") or groundY, p.Position.Z)
 			local houseNumber = tonumber(string.match(p.Name, "^House(%d+)$"))
 			local treeNumber = tonumber(string.match(p.Name, "^Tree(%d+)$"))
 			if houseNumber then
-				house(spot, t, houseNumber)
+				-- a house is turned the way its block is, so houses can face different ways (only
+				-- houses: a tree's block is a cylinder lying on its side)
+				house(spot * p.CFrame.Rotation, t, houseNumber)
 			elseif treeNumber then
 				tree(spot, t, treeNumber)
 			end
