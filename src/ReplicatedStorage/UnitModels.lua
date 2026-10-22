@@ -1,8 +1,8 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: UnitModels
--- (replaces the earlier version: every face under hair is drawn at the Flame Ronin's size and
---  height, and beards come up over the mouth)
+-- (replaces the earlier version: the Coin Merchant wears his straw hat lower, its brim right
+--  on top of his side locks)
 -- Builds the character model for each unit out of parts (no uploaded assets needed).
 -- Every unit has a "look" below. Change them freely.
 --
@@ -591,7 +591,8 @@ function HAIR.StrawHat(m, look)
 	local straw = rgb(225, 195, 115)
 	hairCap(m, look.HairColor)
 	sideLocks(m, look.HairColor)
-	local brim = BAND_Y + 0.08
+	-- (worn low: the brim sits right on top of the side locks)
+	local brim = HEAD_TOP + 0.03
 	disc(m, "Brim", 2.5, 0.1, Vector3.new(0, brim, 0), straw, Enum.Material.Fabric)
 	upright(m, "Crown1", HAIR_SIZE + 0.06, 0.5, Vector3.new(0, brim + 0.25, HAIR_BACK), straw, Enum.Material.Fabric)
 	upright(m, "Band", HAIR_SIZE + 0.1, 0.12, Vector3.new(0, brim + 0.12, HAIR_BACK), look.Vest or look.Accent)
