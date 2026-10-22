@@ -1,9 +1,8 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: UnitModels
--- (replaces the earlier version: the ninjas wear a short flat-topped hood with an eye slit,
---  the Iron Guard a flat-topped bucket helm, and every face is sized to fill the gap its
---  hair, hood or helmet leaves open)
+-- (replaces the earlier version: every face under hair is drawn at the Flame Ronin's size and
+--  height, and beards come up over the mouth)
 -- Builds the character model for each unit out of parts (no uploaded assets needed).
 -- Every unit has a "look" below. Change them freely.
 --
@@ -689,12 +688,25 @@ local FACE_BOXES = {
 	Calm = { 0.13, -0.29, 0.35 }, Cool = { 0.23, -0.31, 0.45 }, Fierce = { 0.36, -0.31, 0.42 },
 }
 
--- Sets FACE_SCALE and FACE_Y so this look's face fills its opening: as big as fits with a
--- little room at the sides and below the mouth, its top just under the top of the gap.
+-- Faces under hair are all drawn like the Flame Ronin's: this size, with the eyes at the
+-- same height, so none sits too high or too big
+local HAIR_FACE_SCALE = 0.7
+local HAIR_FACE_Y = -0.136
+
+-- Sets FACE_SCALE and FACE_Y for this look's face. Under hair: the Flame Ronin's size and
+-- height (smaller if the gap between the side locks is narrower). Bald or in a helmet: as big
+-- as fits the opening, with a little room at the sides and below the mouth, its top just
+-- under the top of the gap.
 local function fitFace(look)
 	FACE_SCALE, FACE_Y = 0.7, -0.13 -- (hoods: only the eyes show, in the slit)
 	local box = FACE_BOXES[look.Face]
 	if look.Hair == "Hood" or not box then return end
+	if look.Hair ~= "Headband" and not string.find(look.Hair, "Helm") then
+		local halfWidth = (FACE_OPENINGS[look.Hair] or HAIRLINE)[2]
+		FACE_SCALE = math.min(HAIR_FACE_SCALE, (halfWidth - 0.04) / box[3])
+		FACE_Y = HAIR_FACE_Y
+		return
+	end
 	local gap = FACE_OPENINGS[look.Hair] or HAIRLINE
 	local top, halfWidth = gap[1], gap[2]
 	FACE_SCALE = math.min((halfWidth - 0.04) / box[3], (top - CHIN - 0.1) / (box[1] - box[2]), 0.9)
@@ -870,7 +882,8 @@ local function buildCharacter(unitName, look)
 	fitFace(look)
 	face(model, look)
 	if look.Beard then
-		add(model, "Beard", Vector3.new(0.8, 0.55, 0.24), CFrame.new(0, 3.9, -0.6), look.HairColor or WHITE)
+		-- (up over the mouth, so the mouth is hidden behind it)
+		add(model, "Beard", Vector3.new(0.8, 0.66, 0.24), CFrame.new(0, 3.98, -0.6), look.HairColor or WHITE)
 		add(model, "BeardTip", Vector3.new(0.46, 0.3, 0.22), CFrame.new(0, 3.48, -0.6), look.HairColor or WHITE)
 	end
 	if look.Mustache then
