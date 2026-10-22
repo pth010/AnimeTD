@@ -1,8 +1,8 @@
 -- PLACE IN: ReplicatedStorage
 -- TYPE: ModuleScript
 -- NAME: UnitModels
--- (replaces the earlier version: the Coin Merchant wears his straw hat lower, its brim right
---  on top of his side locks)
+-- (replaces the earlier version: the side locks are flat strands lying against the face that
+--  end in a point, instead of round sticks)
 -- Builds the character model for each unit out of parts (no uploaded assets needed).
 -- Every unit has a "look" below. Change them freely.
 --
@@ -452,12 +452,20 @@ local function hairCap(m, color, down)
 	upright(m, "HairBack", HAIR_SIZE, HAIR_TOP - bottom, Vector3.new(0, (HAIR_TOP + bottom) / 2, HAIR_BACK), color)
 end
 
--- A lock of hair down each side of the face, to `down` (the chin by default)
+-- A lock of hair down each side of the face, to `down` (the chin by default): a flat strand
+-- lying against the side of the face, flaring out a little, that ends in a point
 local function sideLocks(m, color, down)
-	local bottom = down or 4.12
+	local bottom = down or 4.26
+	local top = HEAD_TOP + 0.02
+	local length = top - bottom - 0.1 -- (the point takes the last bit)
 	for _, side in ipairs({ -1, 1 }) do
-		upright(m, "Lock", 0.2, HEAD_TOP - bottom, Vector3.new(side * 0.44, (HEAD_TOP + bottom) / 2, -0.38), color)
-		ball(m, "LockEnd", 0.2, CFrame.new(side * 0.44, bottom, -0.38), color)
+		local a = R(side * 48) -- round the head from the front
+		local r = HEAD_R + 0.035
+		local lay = CFrame.new(math.sin(a) * r, 0, -math.cos(a) * r) * CFrame.Angles(0, -a, 0)
+		local strand = CFrame.new(0, top, 0) * lay * CFrame.Angles(0, 0, R(side * 7)) -- top of the strand, flared out
+		add(m, "Lock", Vector3.new(0.24, length, 0.07), strand * CFrame.new(0, -length / 2, 0), color)
+		-- the point: a square turned on its corner
+		add(m, "LockEnd", Vector3.new(0.17, 0.17, 0.07), strand * CFrame.new(0, -length, 0) * CFrame.Angles(0, 0, R(45)), color)
 	end
 end
 
@@ -573,7 +581,7 @@ end
 function HAIR.LongHair(m, look)
 	local c = look.HairColor
 	hairCap(m, c)
-	sideLocks(m, c, 4.02)
+	sideLocks(m, c, 4.18)
 	longBack(m, c)
 end
 
