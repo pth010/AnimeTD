@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: LobbyBuilder
--- (replaces the earlier version: adds the Damage Challenge corner (back left): a red gate
---  with a pad to start the solo challenge, a TOP DAMAGE leaderboard board, and a teleport spot)
+-- (replaces the earlier version: the brick paths run in under the fountain's steps on all four
+--  sides, and the two lamps right beside the last walkway lamps are gone)
 -- Builds the lobby at runtime:
 --   * a 300 x 300 stud city square under the open sky: tiled paving, red-brick paths from the
 --     torii gate to the fountain and from the fountain to the gates, the grotto and the park,
@@ -237,11 +237,12 @@ end
 local function path(name, x0, x1, z0, z1)
 	makePart(roomFolder, name, Vector3.new(x1 - x0, 0.1, z1 - z0), CENTER + Vector3.new((x0 + x1) / 2, 0.5, (z0 + z1) / 2), BRICK, Enum.Material.Brick)
 end
--- (they start at the foot of the raised plaza around the fountain, see Wishing Fountain)
-path("Walkway", -10, 10, 46, EDGE)
-path("GatePath", -10, 10, -89, -26) -- up to the arc in front of the gates
-path("CavePath", 36, 82, 1, 15)
-path("ParkPath", -76, -36, 3, 17)
+-- (each one runs in under the raised plaza around the fountain, so it meets the steps with no
+-- paving showing between them, see Wishing Fountain)
+path("Walkway", -10, 10, 10, EDGE)
+path("GatePath", -10, 10, -89, 10) -- up to the arc in front of the gates
+path("CavePath", 0, 82, 1, 15)
+path("ParkPath", -76, 0, 3, 17)
 -- a brick band under the gates, joining them up. It's made of straight pieces around the
 -- curve, each as wide as the band's outer edge needs, so there are no gaps between them; every
 -- other piece sits a hair higher so where they overlap doesn't flicker.
@@ -601,8 +602,11 @@ for _, z in ipairs({ 132, 104, 76, 50 }) do -- along the walkway
 	streetLamp(14, z)
 end
 for i = 1, 8 do -- around the foot of the fountain's raised plaza, leaving the paths clear
-	local a = math.rad(i * 45 + 22.5)
-	streetLamp(FOUNTAIN_POS.X + math.cos(a) * 40, FOUNTAIN_POS.Z + math.sin(a) * 40)
+	-- (not the two either side of the walkway: the walkway's last lamps already stand there)
+	if i ~= 1 and i ~= 2 then
+		local a = math.rad(i * 45 + 22.5)
+		streetLamp(FOUNTAIN_POS.X + math.cos(a) * 40, FOUNTAIN_POS.Z + math.sin(a) * 40)
+	end
 end
 streetLamp(55, -6) -- by the grotto path
 streetLamp(55, 22)
