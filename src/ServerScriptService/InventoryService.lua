@@ -1,8 +1,8 @@
 -- PLACE IN: ServerScriptService
 -- TYPE: Script
 -- NAME: InventoryService
--- (replaces the earlier version: adds fusing units for XP and evolving with extra copies)
--- Handles every button in the inventory. The server checks everything,
+-- (replaces the earlier version: adds "TraitLock", for the Traits Cave's trait locks)
+-- Handles every button in the inventory and the Traits Cave. The server checks everything,
 -- so a locked unit can never be deleted by a hacked client.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -13,40 +13,79 @@ local remote = Instance.new("RemoteFunction")
 remote.Name = "InventoryRemote"
 remote.Parent = ReplicatedStorage
 
--- Actions (second argument is a unit name, a rarity name, or "" when not needed):
---   "Lock",       unitName,   true/false
---   "Delete",     unitName,   1 or "All"
---   "Equip",      unitName,   true/false   (only while auto-equip is off)
---   "AutoEquip",  "",         true/false
---   "AutoDelete", rarityName, true/false
---   "RollTrait",  unitName                 (costs Gold, see TraitData.RollCost)
---   "Fuse",       targetName, { [unitName] = copies }   (feeds other units in for XP)
---   "Evolve",     unitName                 (uses extra copies + Gold, see ProgressData)
-remote.OnServerInvoke = function(player, action, name, arg)
-	if typeof(action) ~= "string" or typeof(name) ~= "string" then
+-- Unit ids are numbers (see UnitData.ParseUnits). Actions:
+--   "Lock",        unitId,     true/false
+--   "Delete",      { unitId, ... }
+--   "Equip",       unitId,     true/false   (turns auto-equip off)
+--   "EquipSlot",   unitId,     slot number  (team bar: put the unit in that slot, turns auto-equip off)
+--   "AutoEquip",   true/false
+--   "AutoDelete",  rarityName, true/false
+--   "SummonTrait", unitId                   (Traits Cave: replaces the unit's trait, costs Trait Shards)
+--   "TraitLock",   traitName,  true/false   (Traits Cave: ask before summoning over this trait)
+--   "Fuse",        targetId,   { unitId, ... }   (feeds those units in for XP)
+--   "Evolve",      unitId                   (uses spare copies + Gold, see ProgressData)
+--   "SaveLayout",  { [element] = { X, Y, S } }  (Screen Layout panel, see LayoutUI)
+--   "SaveSettings", { [name] = true/false }   (Settings popup, see LayoutUI)
+-- SaveLayout and SaveSettings also work during a match; everything else is lobby only.
+
+-- Turns a client-sent list into a clean list of numbers (or nil)
+local function idList(value)
+	if type(value) ~= "table" then return nil end
+	local out = {}
+	for i, id in ipairs(value) do
+		if typeof(id) ~= "number" or i > 1000 then return nil end
+		table.insert(out, id)
+	end
+	return out
+end
+
+remote.OnServerInvoke = function(player, action, a, b)
+	if typeof(action) ~= "string" then
 		return { Success = false, Error = "Bad request." }
 	end
+	if player:GetAttribute("Teleporting") then
+		return { Success = false, Error = "Teleporting..." }
+	end
+	-- screen settings can change any time, even mid-match
+	if action == "SaveLayout" then
+		local ok, err = PlayerData.SaveLayout(player, a)
+		return { Success = ok == true, Error = err }
+	elseif action == "SaveSettings" then
+		local ok, err = PlayerData.SaveSettings(player, a)
+		return { Success = ok == true, Error = err }
+	end
+
 	if player:GetAttribute("InMatch") then
 		return { Success = false, Error = "Not during a match." }
 	end
 
 	local ok, err, trait, xp
 	if action == "Lock" then
-		ok, err = PlayerData.SetLocked(player, name, arg == true)
+		ok, err = PlayerData.SetLocked(player, a, b == true)
 	elseif action == "Delete" then
-		ok, err = PlayerData.DeleteUnit(player, name, arg == "All" and "All" or 1)
+		local ids = idList(a)
+		if not ids then return { Success = false, Error = "Bad request." } end
+		ok, err = PlayerData.DeleteUnits(player, ids)
 	elseif action == "Equip" then
-		ok, err = PlayerData.SetEquipped(player, name, arg == true)
+		ok, err = PlayerData.SetEquipped(player, a, b == true)
+	elseif action == "EquipSlot" then
+		ok, err = PlayerData.EquipToSlot(player, a, b)
 	elseif action == "AutoEquip" then
-		ok, err = PlayerData.SetAutoEquip(player, arg == true)
+		ok, err = PlayerData.SetAutoEquip(player, a == true)
 	elseif action == "AutoDelete" then
-		ok, err = PlayerData.SetAutoDelete(player, name, arg == true)
-	elseif action == "RollTrait" then
-		ok, err, trait = PlayerData.RollTrait(player, name)
+		if typeof(a) ~= "string" then return { Success = false, Error = "Bad request." } end
+		ok, err = PlayerData.SetAutoDelete(player, a, b == true)
+	elseif action == "SummonTrait" then
+		ok, err, trait = PlayerData.SummonTrait(player, a)
+	elseif action == "TraitLock" then
+		if typeof(a) ~= "string" then return { Success = false, Error = "Bad request." } end
+		ok, err = PlayerData.SetTraitLock(player, a, b == true)
 	elseif action == "Fuse" then
-		ok, err, xp = PlayerData.Fuse(player, name, arg)
+		local ids = idList(b)
+		if not ids then return { Success = false, Error = "Bad request." } end
+		ok, err, xp = PlayerData.Fuse(player, a, ids)
 	elseif action == "Evolve" then
-		ok, err = PlayerData.Evolve(player, name)
+		ok, err = PlayerData.Evolve(player, a)
 	else
 		return { Success = false, Error = "Unknown action." }
 	end

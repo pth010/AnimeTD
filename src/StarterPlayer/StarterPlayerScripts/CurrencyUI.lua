@@ -1,17 +1,23 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: CurrencyUI
--- Shows your Gems and Gold on the left side of the screen while in the lobby, and a reward
+-- (replaces the earlier version: the counter can be moved and resized in the Screen Layout
+--  panel, see LayoutUI)
+-- The counter uses the gem, coin and crystal icons from CurrencyIcons.
+-- Shows your Gems, Gold and Trait Shards on the left side of the screen while in the lobby, and a reward
 -- popup when you earn something (e.g. "VICTORY! +375 Gold +75 Gems" after winning a match).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
+local CurrencyIcons = require(ReplicatedStorage:WaitForChild("CurrencyIcons"))
 local rewardEvent = ReplicatedStorage:WaitForChild("RewardEvent")
 local player = Players.LocalPlayer
 
 local GEM_COLOR = Color3.fromRGB(130, 220, 255)
 local GOLD_COLOR = Color3.fromRGB(255, 205, 70)
+local SHARD_COLOR = TraitData.ShardColor
 local PANEL = Color3.fromRGB(25, 25, 40)
 
 local gui = Instance.new("ScreenGui")
@@ -22,24 +28,18 @@ gui.Parent = player:WaitForChild("PlayerGui")
 
 -- ===== Counter (sits just above the Inventory button) =====
 local counter = Instance.new("Frame")
-counter.Position = UDim2.new(0, 10, 0.5, -112)
-counter.Size = UDim2.fromOffset(130, 84)
+counter.Name = "Counter" -- LayoutUI finds it by this name
+counter.Position = UDim2.new(0, 10, 0.5, -146)
+counter.Size = UDim2.fromOffset(130, 118)
 counter.BackgroundColor3 = PANEL
 counter.BackgroundTransparency = 0.1
 counter.Parent = gui
 Instance.new("UICorner", counter).CornerRadius = UDim.new(0, 10)
 
-local function counterRow(y, icon, color)
-	local dot = Instance.new("TextLabel")
-	dot.Position = UDim2.fromOffset(8, y)
-	dot.Size = UDim2.fromOffset(30, 30)
-	dot.BackgroundColor3 = color
-	dot.Text = icon
-	dot.TextColor3 = PANEL
-	dot.Font = Enum.Font.GothamBlack
-	dot.TextSize = 16
-	dot.Parent = counter
-	Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+local function counterRow(y, kind, color)
+	local icon = CurrencyIcons.Make(kind, 30)
+	icon.Position = UDim2.fromOffset(8, y)
+	icon.Parent = counter
 
 	local amount = Instance.new("TextLabel")
 	amount.Position = UDim2.fromOffset(44, y)
@@ -54,8 +54,9 @@ local function counterRow(y, icon, color)
 	return amount
 end
 
-local gemsLabel = counterRow(10, "G", GEM_COLOR)
-local goldLabel = counterRow(44, "$", GOLD_COLOR)
+local gemsLabel = counterRow(10, "Gems", GEM_COLOR)
+local goldLabel = counterRow(44, "Gold", GOLD_COLOR)
+local shardsLabel = counterRow(78, "Shards", SHARD_COLOR) -- Trait Shards (spent in the Traits Cave)
 
 -- 1234567 -> "1,234,567"
 local function commas(n)
@@ -68,10 +69,12 @@ end
 local function refreshCounter()
 	gemsLabel.Text = commas(player:GetAttribute("Gems") or 0)
 	goldLabel.Text = commas(player:GetAttribute("Gold") or 0)
+	shardsLabel.Text = commas(player:GetAttribute("Shards") or 0)
 end
 refreshCounter()
 player:GetAttributeChangedSignal("Gems"):Connect(refreshCounter)
 player:GetAttributeChangedSignal("Gold"):Connect(refreshCounter)
+player:GetAttributeChangedSignal("Shards"):Connect(refreshCounter)
 
 local function updateVisibility()
 	counter.Visible = player:GetAttribute("InMatch") ~= true

@@ -1,12 +1,25 @@
 -- PLACE IN: StarterPlayer > StarterPlayerScripts
 -- TYPE: LocalScript
 -- NAME: PlacementUI
--- (replaces the earlier version: range previews include unit levels and evolution stars)
--- HUD (wave, base HP, cash), unit hotbar, click-to-place with a range preview.
--- Controls: click a unit in the hotbar, then click a green plot to place it.
+-- (replaces the earlier version: in the endless Sky Tower the top bar shows just "Wave 27"
+--  (there's no last wave).
+--  Before that: ground units can't go on high ground: the placement circle
+--  turns red there and clicking says why. A placed unit's panel shows its Ground or High
+--  Ground tag.
+--  Before that: during a Damage Challenge the top bar shows the challenge's timer and damage,
+--  and "Cash: unlimited")
+-- During a match your lighting takes the map's theme (see ArenaThemes).
+-- Switches your lighting to daylight during a match and back to the lobby's night sky
+-- afterwards (see LobbyBuilder), with the map's own lighting on top during the match.
+-- The team bar at the bottom (see InventoryUI) is the hotbar in matches too, so this script
+-- doesn't draw its own. Keys 1-6 follow the team slots.
+-- HUD (wave, base HP, cash) and click-to-place with a range preview.
+-- Controls: click a unit on the team bar, then click a green plot to place it.
 -- Click a placed unit (with nothing selected) to upgrade or sell it.
--- Keys 1-6 pick the unit in that hotbar slot (press the same key again to put it away).
--- Each hotbar slot shows how many of that unit you've placed out of its limit (e.g. 2/5).
+-- Keys 1-6 pick the unit in that team slot (press the same key again to put it away).
+-- The team bar shows each unit's cost and how many you've placed out of its limit (e.g. 2/5).
+-- It talks to this script through the "SelectUnit" BindableEvent (team bar -> pick a unit)
+-- and the "PlacingUnit" attribute on the player (this script -> which unit is being placed).
 -- Q or right-click cancels / closes. (When nothing is open, Q is sprint/dash: see MovementController.)
 
 local Players = game:GetService("Players")
@@ -17,6 +30,7 @@ local RunService = game:GetService("RunService")
 local UnitData = require(ReplicatedStorage:WaitForChild("UnitData"))
 local TraitData = require(ReplicatedStorage:WaitForChild("TraitData"))
 local ProgressData = require(ReplicatedStorage:WaitForChild("ProgressData"))
+local StatIcons = require(ReplicatedStorage:WaitForChild("StatIcons"))
 local placeRemote = ReplicatedStorage:WaitForChild("PlaceUnitRemote")
 local actionRemote = ReplicatedStorage:WaitForChild("UnitActionRemote")
 local placeable = nil   -- this match's PlaceableArea (set when a match starts)
@@ -59,7 +73,7 @@ Instance.new("UICorner", hud).CornerRadius = UDim.new(0, 8)
 
 local toast = Instance.new("TextLabel")
 toast.Size = UDim2.fromOffset(320, 28)
-toast.Position = UDim2.new(0.5, -160, 1, -130)
+toast.Position = UDim2.new(0.5, -160, 1, -190) -- above the team bar
 toast.BackgroundTransparency = 1
 toast.TextColor3 = Color3.fromRGB(255, 120, 120)
 toast.TextStrokeTransparency = 0.5
@@ -68,7 +82,9 @@ toast.TextSize = 18
 toast.Text = ""
 toast.Parent = gui
 
+-- (the old hotbar frame is kept but never shown: the team bar replaced it)
 local hotbar = Instance.new("Frame")
+hotbar.Visible = false
 hotbar.Size = UDim2.fromOffset(720, 70)
 hotbar.Position = UDim2.new(0.5, -360, 1, -90)
 hotbar.BackgroundTransparency = 1
@@ -91,17 +107,24 @@ local function showToast(text)
 end
 
 local function refreshHud()
+	if player:GetAttribute("Challenge") == true then
+		-- the Damage Challenge: the timer and damage are in the status, and cash is unlimited
+		hud.Text = (player:GetAttribute("MatchStatus") or "") .. "   |   Cash: unlimited"
+		return
+	end
+	-- (MaxWave 0 = an endless run, like the Sky Tower: no last wave to show)
+	local maxWave = player:GetAttribute("MaxWave") or 0
+	local wave = player:GetAttribute("Wave") or 0
 	hud.Text = string.format(
-		"%s   |   Base HP: %d   |   Wave %d/%d   |   Cash: $%d",
+		"%s   |   Base HP: %d   |   %s   |   Cash: $%d",
 		player:GetAttribute("MatchStatus") or "",
 		player:GetAttribute("BaseHealth") or 0,
-		player:GetAttribute("Wave") or 0,
-		player:GetAttribute("MaxWave") or 0,
+		maxWave > 0 and string.format("Wave %d/%d", wave, maxWave) or ("Wave " .. wave),
 		player:GetAttribute("Cash") or 0
 	)
 end
 refreshHud()
-for _, name in ipairs({ "MatchStatus", "BaseHealth", "Wave", "MaxWave" }) do
+for _, name in ipairs({ "MatchStatus", "BaseHealth", "Wave", "MaxWave", "Challenge" }) do
 	player:GetAttributeChangedSignal(name):Connect(refreshHud)
 end
 player:GetAttributeChangedSignal("Cash"):Connect(refreshHud)
@@ -142,7 +165,32 @@ local function panelButton(posY, color)
 end
 
 local panelTitle = panelLabel(8, 24, 17)
-local panelStats = panelLabel(36, 86, 14)
+-- stats as icon chips (two rows), with the trait written underneath
+local STAT_CHIP = 20
+local function chipRow(posY)
+	local row = Instance.new("Frame")
+	row.Position = UDim2.fromOffset(8, posY)
+	row.Size = UDim2.new(1, -16, 0, STAT_CHIP)
+	row.BackgroundTransparency = 1
+	row.Parent = panel
+	return row
+end
+local statRow = chipRow(36)
+local statRow2 = chipRow(60)
+local panelStats = panelLabel(82, 40, 12)
+
+-- Refills a chip row only when what it shows has changed (the panel refreshes on every attack)
+local function showChips(row, chips)
+	local parts = {}
+	for _, c in ipairs(chips) do
+		table.insert(parts, c[1] .. "=" .. c[2])
+	end
+	local key = table.concat(parts, ";")
+	if row:GetAttribute("Shown") ~= key then
+		row:SetAttribute("Shown", key)
+		StatIcons.Fill(row, chips, STAT_CHIP)
+	end
+end
 local upgradeBtn = panelButton(122, Color3.fromRGB(60, 160, 90))
 local sellBtn = panelButton(168, Color3.fromRGB(190, 70, 70))
 
@@ -159,8 +207,18 @@ rangeRing.Transparency = 0.75
 local inspected = nil
 local inspectConns = {}
 
+-- Units' name tags are hidden (GameService makes them switched off). Show the clicked one's.
+-- This only changes your own screen.
+local function setNameTagShown(part, shown)
+	local tag = part and part:FindFirstChild("NameTag")
+	if tag and tag:IsA("BillboardGui") then
+		tag.Enabled = shown
+	end
+end
+
 local function closePanel()
 	panel.Visible = false
+	setNameTagShown(inspected, false)
 	inspected = nil
 	rangeRing.Parent = nil
 	for _, c in ipairs(inspectConns) do c:Disconnect() end
@@ -183,21 +241,34 @@ local function refreshPanel()
 	panelTitle.Text = string.format("%s  Lv %d/%d", inspected.Name, level, maxLevel)
 	local trait = TraitData.Get(inspected:GetAttribute("Trait"))
 	local isFarm = inspected:GetAttribute("IsFarm") == true
-	local statsText
 	if isFarm then
 		local nextIncome = inspected:GetAttribute("NextIncome") or 0
-		statsText = string.format("Income: $%d per wave", inspected:GetAttribute("Income") or 0)
-		statsText ..= nextIncome > 0 and string.format("\nNext level: $%d per wave", nextIncome) or "\nMax income!"
+		local every = inspected:GetAttribute("PayEvery") or 10
+		showChips(statRow, { { "Income", string.format("$%d / %ds", inspected:GetAttribute("Income") or 0, every) } })
+		showChips(statRow2, {
+			{ "Ground", "Ground" },
+			{ "Income", nextIncome > 0 and string.format("Next lv: $%d", nextIncome) or "Max income!" },
+		})
 	else
-		statsText = string.format("Damage: %d\nRange: %.1f", math.floor(damage), range)
-		if inspected:GetAttribute("HighGround") then
-			statsText ..= "\nHigh ground bonus!"
+		local row = { { "Damage", tostring(math.floor(damage)) }, { "Range", string.format("%.1f", range) } }
+		local cooldown = inspected:GetAttribute("Cooldown")
+		if cooldown then
+			table.insert(row, { "Speed", string.format("%.2fs", cooldown) })
 		end
+		showChips(statRow, row)
+		local below = TraitData.EffectChips(inspected.Name, inspected:GetAttribute("Trait")) -- (with its trait)
+		-- its tag first: Ground, High ground, or (standing on it) the range bonus it's getting
+		if inspected:GetAttribute("HighGround") then
+			local bonus = math.floor((UnitData.HighGroundRangeMult - 1) * 100 + 0.5)
+			table.insert(below, 1, { "HighGround", string.format("High ground +%d%%", bonus) })
+		elseif UnitData.CanUseHighGround(inspected.Name) then
+			table.insert(below, 1, { "HighGround", "High ground" })
+		else
+			table.insert(below, 1, { "Ground", "Ground" })
+		end
+		showChips(statRow2, below)
 	end
-	if trait then
-		statsText ..= string.format("\nTrait: %s (%s)", trait.Name, TraitData.Describe(trait.Name))
-	end
-	panelStats.Text = statsText
+	panelStats.Text = trait and string.format("Trait: %s (%s)", trait.Name, TraitData.Describe(trait.Name)) or ""
 	upgradeBtn.Text = cost >= 0 and string.format("Upgrade ($%d)", cost) or "MAX LEVEL"
 	sellBtn.Text = string.format("Sell (+$%d)", sellValue)
 
@@ -210,6 +281,7 @@ end
 local function openPanel(part)
 	closePanel()
 	inspected = part
+	setNameTagShown(part, true)
 	table.insert(inspectConns, part.AttributeChanged:Connect(refreshPanel))
 	table.insert(inspectConns, part.AncestryChanged:Connect(refreshPanel))
 	panel.Visible = true
@@ -268,8 +340,10 @@ RunService.RenderStepped:Connect(function()
 	if not selected then return end
 	local hit = mouseRaycast()
 	if hit then
+		local onHigh = hit.Instance:GetAttribute("HighGround") == true
 		local ok = placeable ~= nil and hit.Instance:IsDescendantOf(placeable)
-		local mult = hit.Instance:GetAttribute("HighGround") and UnitData.HighGroundRangeMult or 1
+			and (not onHigh or UnitData.CanUseHighGround(selected)) -- ground units can't climb
+		local mult = (onHigh and ok) and UnitData.HighGroundRangeMult or 1
 		local r = selectedRange * mult
 		ghost.Size = Vector3.new(0.2, r * 2, r * 2)
 		ghost.Color = ok and Color3.fromRGB(80, 255, 120) or Color3.fromRGB(255, 80, 80)
@@ -335,7 +409,10 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 
 	if selected then
 		-- Placing a unit
-		if hit and placeable and hit.Instance:IsDescendantOf(placeable) then
+		if hit and placeable and hit.Instance:IsDescendantOf(placeable)
+			and hit.Instance:GetAttribute("HighGround") and not UnitData.CanUseHighGround(selected) then
+			showToast(selected .. " is a ground unit. Only archers and mages can go on high ground.")
+		elseif hit and placeable and hit.Instance:IsDescendantOf(placeable) then
 			local res = placeRemote:InvokeServer(selected, hit.Position)
 			if not res.Success then
 				showToast(res.Error)
@@ -357,86 +434,47 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 end)
 
--- ===== HOTBAR =====
-local hotbarButtons = {} -- [unit name] = its hotbar button
-
--- Outlines the hotbar slot of the unit you're currently placing
+-- ===== HOTBAR (drawn by the team bar in InventoryUI) =====
+-- Tells the team bar which unit you're placing, so it can outline that slot
 function refreshHotbarHighlight()
-	for name, b in pairs(hotbarButtons) do
-		b.UIStroke.Enabled = name == selected
-	end
+	player:SetAttribute("PlacingUnit", selected or "")
 end
 
--- Shows "placed/limit" on each slot and greys out the ones that are full
+-- Stop placing a unit once you've hit its limit
 local function refreshHotbarCounts()
-	for i, name in ipairs(hotbarNames) do
-		local b = hotbarButtons[name]
-		if b then
-			local limit = UnitData.GetPlacementLimit(name)
-			local placed = placedCount(name)
-			local full = placed >= limit
-			local color = UnitData.RarityColor[UnitData.UnitRarity[name]]
-			b.Text = string.format("[%d] %s\n$%d  -  %d/%d", i, name, myStats(name).Cost, placed, limit)
-			b.BackgroundColor3 = full and color:Lerp(Color3.fromRGB(60, 60, 70), 0.75) or color
-			b.TextTransparency = full and 0.35 or 0
-		end
-	end
-	-- stop placing a unit once you've hit its limit
 	if selected and atLimit(selected) then
 		selectUnit(nil)
 	end
 end
 
+-- The units in team slot order (the "Equipped" attribute is already in slot order), so
+-- key 1 is slot 1 on the team bar
 local function rebuildHotbar()
-	for _, c in ipairs(hotbar:GetChildren()) do
-		if c:IsA("TextButton") then c:Destroy() end
-	end
-
 	local names = {}
 	for name in string.gmatch(player:GetAttribute("Equipped") or "", "[^,]+") do
 		if UnitData.GetStats(name) then
 			table.insert(names, name)
 		end
 	end
-	table.sort(names, function(a, b)
-		local ca, cb = myStats(a).Cost, myStats(b).Cost
-		if ca ~= cb then return ca < cb end
-		return a < b
-	end)
-
 	hotbarNames = names
-	table.clear(hotbarButtons)
-
-	for i, name in ipairs(names) do
-		local stats = myStats(name)
-		local b = Instance.new("TextButton")
-		b.LayoutOrder = i
-		b.Size = UDim2.fromOffset(100, 64)
-		b.BackgroundColor3 = UnitData.RarityColor[UnitData.UnitRarity[name]]
-		b.TextColor3 = Color3.new(1, 1, 1)
-		b.TextStrokeTransparency = 0.2
-		b.Font = Enum.Font.GothamBold
-		b.TextSize = 14
-		b.TextWrapped = true
-		b.Text = string.format("[%d] %s\n$%d", i, name, stats.Cost)
-		b.Parent = hotbar
-		Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
-		local stroke = Instance.new("UIStroke")
-		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		stroke.Thickness = 3
-		stroke.Color = Color3.new(1, 1, 1)
-		stroke.Enabled = false
-		stroke.Parent = b
-		hotbarButtons[name] = b
-		b.Activated:Connect(function()
-			if atLimit(name) then
-				showToast(string.format("%s limit reached (%d/%d).", name, placedCount(name), UnitData.GetPlacementLimit(name)))
-				return
-			end
-			selectUnit(name)
-		end)
-	end
 end
+
+-- The team bar asks to pick a unit through this event: the same rules as the number keys
+local selectEvent = Instance.new("BindableEvent")
+selectEvent.Name = "SelectUnit"
+selectEvent.Parent = gui
+selectEvent.Event:Connect(function(name)
+	if player:GetAttribute("InMatch") ~= true or typeof(name) ~= "string" then return end
+	if not table.find(hotbarNames, name) then return end
+	if selected == name then
+		selectUnit(nil) -- clicking the same slot again puts it away
+	elseif atLimit(name) then
+		showToast(string.format("%s limit reached (%d/%d).", name, placedCount(name), UnitData.GetPlacementLimit(name)))
+	else
+		selectUnit(name)
+	end
+end)
+
 rebuildHotbar()
 refreshHotbarCounts()
 refreshHotbarHighlight()
@@ -444,7 +482,7 @@ player:GetAttributeChangedSignal("PlacedCounts"):Connect(refreshHotbarCounts)
 local function onTeamChanged()
 	rebuildHotbar()
 	refreshHotbarCounts()
-	if selected and not hotbarButtons[selected] then
+	if selected and not table.find(hotbarNames, selected) then
 		selectUnit(nil) -- the unit you were placing left your team
 	else
 		refreshHotbarHighlight()
@@ -454,12 +492,96 @@ player:GetAttributeChangedSignal("Equipped"):Connect(onTeamChanged)
 player:GetAttributeChangedSignal("UnitTraits"):Connect(onTeamChanged) -- costs change with traits
 player:GetAttributeChangedSignal("UnitProgress"):Connect(onTeamChanged)
 
+-- ===== DAY / NIGHT =====
+-- The lobby is night, matches are daylight. LobbyBuilder stores both versions of each lighting
+-- setting on Lighting as attributes ("Day_ClockTime" / "Night_ClockTime", ...); this switches
+-- your own lighting between them (only on your screen).
+local Lighting = game:GetService("Lighting")
+local LIGHTING_PROPS = { "ClockTime", "Brightness", "Ambient", "OutdoorAmbient", "ExposureCompensation",
+	"EnvironmentDiffuseScale", "EnvironmentSpecularScale" }
+local function applyTimeOfDay(day)
+	local prefix = day and "Day_" or "Night_"
+	for _, prop in ipairs(LIGHTING_PROPS) do
+		local value = Lighting:GetAttribute(prefix .. prop)
+		if value ~= nil then
+			Lighting[prop] = value
+		end
+	end
+	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
+	local density = Lighting:GetAttribute(prefix .. "AtmosphereDensity")
+	if atmosphere and density then
+		atmosphere.Density = density
+	end
+end
+
+-- ===== MAP LIGHTING =====
+-- Each map's theme can have its own lighting (see ArenaThemes). It goes on top of the
+-- daylight during a match, only on your screen, and comes off again afterwards.
+local ArenaThemes = require(ReplicatedStorage:WaitForChild("ArenaThemes"))
+local themeColor = Instance.new("ColorCorrectionEffect")
+themeColor.Name = "ArenaThemeColor"
+themeColor.Enabled = false
+themeColor.Parent = Lighting
+local ATMOSPHERE_PROPS = { "Density", "Offset", "Color", "Decay", "Glare", "Haze" }
+local atmosphereBefore = nil -- the atmosphere as it was before a map's lighting changed it
+
+local function clearMapLighting()
+	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
+	if atmosphere and atmosphereBefore then
+		for prop, value in pairs(atmosphereBefore) do
+			atmosphere[prop] = value
+		end
+	end
+	atmosphereBefore = nil
+	themeColor.Enabled = false
+end
+
+local function applyMapLighting()
+	local look = ArenaThemes.Get(player:GetAttribute("ArenaTheme")).Lighting
+	if not look then return end
+	for _, prop in ipairs(LIGHTING_PROPS) do
+		if look[prop] ~= nil then
+			Lighting[prop] = look[prop]
+		end
+	end
+	if look.Atmosphere then
+		local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
+		if not atmosphere then
+			atmosphere = Instance.new("Atmosphere")
+			atmosphere.Density = 0
+			atmosphere.Parent = Lighting
+		end
+		atmosphereBefore = {}
+		for _, prop in ipairs(ATMOSPHERE_PROPS) do
+			atmosphereBefore[prop] = atmosphere[prop]
+		end
+		for prop, value in pairs(look.Atmosphere) do
+			atmosphere[prop] = value
+		end
+	end
+	themeColor.TintColor = look.Tint or Color3.new(1, 1, 1)
+	themeColor.Saturation = look.Saturation or 0
+	themeColor.Contrast = look.Contrast or 0
+	themeColor.Enabled = true
+end
+
+-- Day or night, then the map's own lighting on top while in a match
+local function updateLighting()
+	local inMatch = player:GetAttribute("InMatch") == true
+	clearMapLighting()
+	applyTimeOfDay(inMatch)
+	if inMatch then
+		applyMapLighting()
+	end
+end
+player:GetAttributeChangedSignal("ArenaTheme"):Connect(updateLighting)
+
 -- ===== LOBBY vs MATCH =====
 -- The HUD and hotbar only show while you're in a match
 local function updateMatchVisibility()
 	local inMatch = player:GetAttribute("InMatch") == true
+	updateLighting()
 	hud.Visible = inMatch
-	hotbar.Visible = inMatch
 	if not inMatch then
 		selectUnit(nil)
 		closePanel()
