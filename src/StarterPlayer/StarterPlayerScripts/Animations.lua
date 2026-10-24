@@ -616,13 +616,14 @@ local ECL_RUBBLE = Color3.fromRGB(70, 60, 70)
 function EFFECTS.Eclipse(hitbox, target, _, speed)
 	local blade = hitbox:FindFirstChild("Blade", true)
 	-- The eclipse floats where the tip of his sword ends up when he thrusts it straight up
-	-- (over his sword hand, about 10 studs up at level 1; models grow a little every level)
+	-- (over his sword hand, about 11.7 studs up at level 1 with his greatsword; models grow a
+	-- little every level)
 	local model = hitbox:FindFirstChildWhichIsA("Model")
 	local root = model and model.PrimaryPart
 	local scale = model and model:GetScale() or 1
 	local turn = root and root.CFrame.Rotation or CFrame.new()
 	local feet = hitbox.Position - Vector3.new(0, hitbox.Size.Y / 2, 0)
-	local top = feet + turn * (Vector3.new(1.5, 10.3, 0.15) * scale)
+	local top = feet + turn * (Vector3.new(1.5, 11.7, 0.15) * scale)
 	local pierce = 0.23 -- seconds after this starts that the blade reaches it
 
 	-- 1. the windup: the eclipse swells over his head, turned to face your camera: a black sun

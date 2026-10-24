@@ -2,7 +2,8 @@
 -- TYPE: ModuleScript
 -- NAME: UnitModels
 -- (replaces the earlier version: units' legs are on hip joints too (LegL / LegR), so attacks
---  can move them: the Eclipse Emperor leaps)
+--  can move them: the Eclipse Emperor leaps; the Eclipse Emperor is now a black swordsman in
+--  dark iron armor, with a tattered cape and a huge slab of a sword)
 -- Builds the character model for each unit out of parts (no uploaded assets needed).
 -- Every unit has a "look" below. Change them freely.
 --
@@ -45,16 +46,18 @@ local MOUTH = rgb(60, 30, 30)
 --   Skin, Shirt, Pants        colors (Shoes too, if you like)
 --   Sleeves                   "None" (bare arms), "Short" or "Long"
 --   Outfit                    "Tee" (Belt = true for a belt), "Armor" (Metal = its color),
---                             "Robe", "Kimono", "Ninja", "Vest" (Vest = its color), "Miko"
+--                             "Robe", "Kimono", "Ninja", "Vest" (Vest = its color), "Miko",
+--                             "BlackSwordsman" (dark iron armor with an iron left arm; Metal, Accent = leather)
 --   Hair                      Headband, Ponytail, Hood, KnightHelm, BucketHelm, WizardHat,
 --                             LongHair, Topknot, StrawHat, HornedHelm, Halo, Crown, FoxEars,
---                             Crescent, Hairpin   (HairColor; HatColor for the wizard hat)
+--                             Crescent, Hairpin, Spiky   (HairColor; HatColor for the wizard hat)
 --   Face                      Smile, Grin, Angry, Calm, Cool, Fierce, Masked, Visor
---                             (Eyes = their color; Fierce eyes glow)
+--                             (Eyes = their color; Fierce eyes glow; Scar = true for a scar
+--                             across the nose)
 --   Weapon                    Sword, Katana, SwordShield, Daggers, Lance, Staff, Bow, CoinBag,
---                             LuckyFan
+--                             LuckyFan, Greatsword
 --   Accent, Accent2           trim colors (belts, sashes, plumes, collars...)
---   Extras                    Cape = color, Wings = color, Tails = how many fox tails,
+--   Extras                    Cape = color (Tattered = true for a ragged one), Wings = color, Tails = how many fox tails,
 --                             Aura = color (sparkles + glow), Scarf = color, Quiver = true,
 --                             Beard = true, Mustache = true, Glow = weapon glow color
 local R = math.rad
@@ -123,11 +126,11 @@ UnitModels.Looks = {
 		Face = "Smile", Eyes = rgb(230, 170, 40), Weapon = "LuckyFan", Aura = rgb(255, 210, 90), Glow = GOLD },
 
 	-- Mythic
-	["Eclipse Emperor"] = {
-		Skin = rgb(200, 190, 200), Shirt = rgb(25, 20, 30), Pants = rgb(15, 12, 20), Sleeves = "Long",
-		Outfit = "Armor", Metal = rgb(34, 28, 40), Hair = "Crown", HairColor = rgb(20, 15, 25), Accent = GOLD,
-		Face = "Fierce", Eyes = rgb(255, 60, 90), Weapon = "Sword", Cape = rgb(130, 10, 30),
-		Aura = rgb(255, 60, 90), Glow = rgb(255, 60, 90) },
+	["Eclipse Emperor"] = { -- a black swordsman: dark iron armor, a ragged black cape and a slab of a sword
+		Skin = rgb(214, 168, 128), Shirt = rgb(28, 26, 32), Pants = rgb(30, 28, 34), Shoes = rgb(78, 78, 86), Sleeves = "None",
+		Outfit = "BlackSwordsman", Metal = rgb(78, 78, 86), Hair = "Spiky", HairColor = rgb(22, 20, 24), Accent = rgb(105, 70, 42),
+		Face = "Angry", Eyes = rgb(60, 50, 55), Scar = true, Weapon = "Greatsword", Cape = rgb(18, 16, 20), Tattered = true,
+		Scarf = rgb(25, 23, 28), Aura = rgb(255, 60, 90), Glow = rgb(255, 60, 90) },
 	["Starfall Kitsune"] = {
 		Skin = rgb(250, 232, 225), Shirt = rgb(250, 240, 250), Pants = rgb(230, 150, 200), Sleeves = "Long",
 		Outfit = "Kimono", Accent = rgb(255, 120, 190), Accent2 = rgb(255, 220, 120), Hair = "FoxEars",
@@ -321,6 +324,54 @@ function OUTFITS.Miko(m, look)
 	end
 end
 
+function OUTFITS.BlackSwordsman(m, look)
+	local metal = look.Metal or METAL
+	local leather = look.Accent or rgb(105, 70, 42)
+	local dark = leather:Lerp(DARK, 0.5)
+	local bandage = rgb(225, 215, 190)
+	-- a dark iron breastplate with ridges down the left side
+	add(m, "Chestplate", Vector3.new(2.1, 1.5, 1.1), CFrame.new(0, 3.2, 0), metal, Enum.Material.Metal)
+	for k = 0, 2 do
+		add(m, "Trim", Vector3.new(0.6, 0.07, 0.05), CFrame.new(-0.5, 3.35 - k * 0.25, -0.57), metal:Lerp(WHITE, 0.35), Enum.Material.Metal)
+	end
+	-- a bandolier from the right shoulder down to the left hip, with throwing knives on it
+	local strap = CFrame.new(0, 3.1, -0.58) * CFrame.Angles(0, 0, R(-38))
+	add(m, "Strap", Vector3.new(0.28, 2.4, 0.06), strap, dark)
+	for _, t in ipairs({ 0.75, 0.35, -0.05, -0.45 }) do
+		add(m, "Knife", Vector3.new(0.15, 0.55, 0.07), strap * CFrame.new(0, t, -0.04) * CFrame.Angles(0, 0, R(70)), leather)
+	end
+	-- a wide leather belt with a pouch and a knife on it, and a laced flap below
+	add(m, "Belt", Vector3.new(2.08, 0.32, 1.08), CFrame.new(0, 2.15, 0), leather)
+	add(m, "Buckle", Vector3.new(0.32, 0.26, 0.06), CFrame.new(0, 2.15, -0.56), metal, Enum.Material.Metal)
+	add(m, "Pouch", Vector3.new(0.45, 0.55, 0.35), CFrame.new(0.95, 1.95, -0.42), leather)
+	add(m, "BeltKnife", Vector3.new(0.1, 0.5, 0.06), CFrame.new(0.55, 1.85, -0.6), metal, Enum.Material.Metal)
+	add(m, "BeltKnife", Vector3.new(0.14, 0.25, 0.1), CFrame.new(0.55, 2.2, -0.6), dark)
+	add(m, "Tasset", Vector3.new(0.6, 0.75, 0.06), CFrame.new(0, 1.65, -0.54), leather)
+	for _, side in ipairs({ -1, 1 }) do
+		for k = 0, 1 do
+			add(m, "Lace", Vector3.new(0.5, 0.04, 0.03), CFrame.new(0, 1.85 - k * 0.3, -0.58) * CFrame.Angles(0, 0, R(side * 30)), bandage)
+		end
+	end
+	-- the left arm is iron from the shoulder down, under layered plates
+	add(m, "Gauntlet", Vector3.new(1.08, 1.6, 1.08), CFrame.new(-1.5, 2.8, 0), metal, Enum.Material.Metal)
+	add(m, "Gauntlet", Vector3.new(1.14, 0.45, 1.14), CFrame.new(-1.5, 2.2, 0), metal:Lerp(DARK, 0.3), Enum.Material.Metal)
+	for k = 0, 2 do
+		add(m, "Shoulder", Vector3.new(1.25 - k * 0.04, 0.32, 1.22 - k * 0.04), CFrame.new(-1.55 - k * 0.03, 4.08 - k * 0.24, 0)
+			* CFrame.Angles(0, 0, R(8)), k % 2 == 0 and metal or metal:Lerp(WHITE, 0.15), Enum.Material.Metal)
+	end
+	-- the right arm is bare, with a plate on the shoulder, a strap round it and bandages at the wrist
+	add(m, "Shoulder", Vector3.new(1.15, 0.35, 1.15), CFrame.new(1.5, 4.05, 0), metal, Enum.Material.Metal)
+	add(m, "Cuff", Vector3.new(1.04, 0.12, 1.04), CFrame.new(1.5, 3.3, 0), dark)
+	add(m, "Cuff", Vector3.new(1.06, 0.5, 1.06), CFrame.new(1.5, 2.45, 0), bandage, Enum.Material.Fabric)
+	-- iron on the legs, with leather wrapped round the tops of the boots
+	for _, side in ipairs({ -1, 1 }) do
+		add(m, "Greave", Vector3.new(1.06, 0.7, 1.06), CFrame.new(side * 0.5, 1.55, 0), metal, Enum.Material.Metal)
+		add(m, "Knee", Vector3.new(1.1, 0.3, 1.12), CFrame.new(side * 0.5, 1.08, -0.02), metal:Lerp(WHITE, 0.15), Enum.Material.Metal)
+		add(m, "Greave", Vector3.new(1.06, 0.4, 1.06), CFrame.new(side * 0.5, 0.78, 0), metal, Enum.Material.Metal)
+		add(m, "BootCuff", Vector3.new(1.12, 0.3, 1.14), CFrame.new(side * 0.5, 0.5, 0), leather, Enum.Material.Fabric)
+	end
+end
+
 -- ===== Faces (drawn with thin parts so they show in menu pictures too) =====
 -- Each face is drawn at FACE_SCALE of the sizes below, FACE_Y from the middle of the head.
 -- Both are worked out for every unit (see fitFace) so its face fills the gap its hair, hood or
@@ -509,6 +560,32 @@ local function arc(m, name, radius, y, fromDeg, toDeg, pieces, height, thickness
 		local length = 2 * radius * math.sin(R(math.abs(step)) / 2) + 0.02
 		add(m, name, Vector3.new(length, height, thickness),
 			CFrame.new(math.sin(a) * radius, y, -math.cos(a) * radius) * CFrame.Angles(0, -a, 0), color, material)
+	end
+end
+
+function HAIR.Spiky(m, look)
+	local c = look.HairColor
+	hairCap(m, c, 4.3) -- (short at the back)
+	sideLocks(m, c, 4.4, BANGS_TOP)
+	bangs(m, c)
+	-- chunky spikes sticking up and out all over the top, each a square turned on its corner
+	-- that narrows in steps to a point: { turn round from the front, tilt from straight up,
+	-- length } (they start inside the hair, so only their outer part shows)
+	local center = Vector3.new(0, HAIR_TOP, HAIR_BACK)
+	local spikes = { { 180, 12, 0.75 }, { -30, 45, 0.5 }, { 30, 45, 0.5 } }
+	for k = 0, 5 do table.insert(spikes, { k * 60, 35, 0.68 }) end
+	for _, yaw in ipairs({ 90, 135, 180, 225, 270 }) do -- (lower down only round the sides and back, clear of the face)
+		table.insert(spikes, { yaw, 72, 0.58 })
+	end
+	for _, s in ipairs(spikes) do
+		local yaw, tilt, length = R(s[1]), R(s[2]), s[3]
+		local dir = Vector3.new(math.sin(yaw) * math.sin(tilt), math.cos(tilt), -math.cos(yaw) * math.sin(tilt))
+		local base = center + dir * 0.38
+		local along = CFrame.lookAt(base, base + dir + Vector3.new(0, 0, 0.001)) * CFrame.Angles(R(-90), 0, 0) * CFrame.Angles(0, R(45), 0)
+		for _, step in ipairs({ { 0.38, 0, 0.55 }, { 0.24, 0.5, 0.35 }, { 0.12, 0.8, 0.2 } }) do
+			local w, from, l = step[1], step[2] * length, step[3] * length
+			add(m, "Spike", Vector3.new(w, l, w), along * CFrame.new(0, from + l / 2, 0), c)
+		end
 	end
 end
 
@@ -836,6 +913,29 @@ function WEAPON.CoinBag(m, look)
 	coin.Shape = Enum.PartType.Cylinder
 end
 
+-- A huge slab of a sword in the right hand: dark iron, thick, wide and blunt-tipped, with a
+-- cloth-wrapped handle and tails of cloth hanging off the pommel
+function WEAPON.Greatsword(m, look)
+	local grip = RIGHT_HAND * CFrame.Angles(R(-35), 0, 0)
+	local iron = rgb(70, 70, 78)
+	local wrap = rgb(190, 170, 130)
+	local length, width, thick = 3.3, 0.8, 0.24
+	add(m, "Handle", Vector3.new(0.2, 0.9, 0.2), grip * CFrame.new(0, -0.12, 0), wrap, Enum.Material.Fabric)
+	add(m, "Pommel", Vector3.new(0.3, 0.22, 0.3), grip * CFrame.new(0, -0.62, 0), iron, Enum.Material.Metal)
+	for _, side in ipairs({ -1, 1 }) do
+		add(m, "SwordTail", Vector3.new(0.12, 0.7, 0.04), grip * CFrame.new(side * 0.06, -0.95, 0.05) * CFrame.Angles(R(20), 0, R(side * 10)), wrap, Enum.Material.Fabric)
+	end
+	add(m, "Guard", Vector3.new(thick + 0.12, 0.2, width + 0.12), grip * CFrame.new(0, 0.4, 0), iron, Enum.Material.Metal)
+	add(m, "Blade", Vector3.new(thick, length, width), grip * CFrame.new(0, 0.5 + length / 2, 0), iron, Enum.Material.Metal)
+	-- worn, lighter edges, and a point: a square turned on its corner at the top
+	for _, side in ipairs({ -1, 1 }) do
+		add(m, "Edge" .. (side + 2), Vector3.new(thick + 0.02, length - 0.1, 0.06), grip * CFrame.new(0, 0.5 + length / 2, side * (width / 2 - 0.02)),
+			rgb(150, 150, 158), Enum.Material.Metal)
+	end
+	local side = width / math.sqrt(2)
+	add(m, "Blade2", Vector3.new(thick, side, side), grip * CFrame.new(0, 0.5 + length, 0) * CFrame.Angles(R(45), 0, 0), iron, Enum.Material.Metal)
+end
+
 -- A golden fan in the right hand, with a lucky charm hanging from the left
 function WEAPON.LuckyFan(m, look)
 	local grip = RIGHT_HAND * CFrame.new(0, 0.3, -0.25) * CFrame.Angles(R(-20), 0, 0)
@@ -849,9 +949,21 @@ function WEAPON.LuckyFan(m, look)
 end
 
 -- ===== Extras =====
-local function addCape(m, color)
-	add(m, "Cape", Vector3.new(1.9, 3.0, 0.14), CFrame.new(0, 2.55, 0.62) * CFrame.Angles(R(8), 0, 0), color, Enum.Material.Fabric)
-	add(m, "CapeClasp", Vector3.new(1.9, 0.22, 0.25), CFrame.new(0, 3.9, 0.55), GOLD, Enum.Material.Metal)
+local function addCape(m, color, tattered)
+	if not tattered then
+		add(m, "Cape", Vector3.new(1.9, 3.0, 0.14), CFrame.new(0, 2.55, 0.62) * CFrame.Angles(R(8), 0, 0), color, Enum.Material.Fabric)
+		add(m, "CapeClasp", Vector3.new(1.9, 0.22, 0.25), CFrame.new(0, 3.9, 0.55), GOLD, Enum.Material.Metal)
+		return
+	end
+	-- a ragged cape: shorter, with torn strips of different lengths hanging off the bottom
+	local cape = CFrame.new(0, 2.9, 0.62) * CFrame.Angles(R(8), 0, 0)
+	add(m, "Cape", Vector3.new(2.0, 2.0, 0.14), cape, color, Enum.Material.Fabric)
+	for i, length in ipairs({ 0.9, 0.5, 1.25, 0.7, 1.1, 0.45 }) do
+		local x = -0.83 + (i - 1) * 0.33
+		add(m, "Cape", Vector3.new(0.3, length, 0.12), cape * CFrame.new(x, -1 - length / 2 + 0.05, 0.02) * CFrame.Angles(0, 0, R((i % 2 == 0 and 4 or -5))),
+			color, Enum.Material.Fabric)
+	end
+	add(m, "CapeClasp", Vector3.new(2.0, 0.22, 0.25), CFrame.new(0, 3.9, 0.55), DARK, Enum.Material.Metal)
 end
 
 local function addWings(m, color)
@@ -871,8 +983,9 @@ local function addTails(m, count, color, tipColor)
 	end
 end
 
-local function addScarf(m, color)
-	upright(m, "Scarf", HEAD_R * 2 + 0.26, 0.32, Vector3.new(0, 4.1, 0.04), color, Enum.Material.Fabric)
+local function addScarf(m, color, low)
+	-- (`low`: worn down round the neck, so the mouth shows above it)
+	upright(m, "Scarf", HEAD_R * 2 + 0.26, low and 0.24 or 0.32, Vector3.new(0, low and 4.02 or 4.1, 0.04), color, Enum.Material.Fabric)
 	add(m, "ScarfTail", Vector3.new(0.4, 1.4, 0.12), CFrame.new(0.45, 3.5, 0.65) * CFrame.Angles(R(15), 0, R(-10)), color, Enum.Material.Fabric)
 end
 
@@ -918,6 +1031,9 @@ local function buildCharacter(unitName, look)
 		add(model, "Beard", Vector3.new(0.8, 0.66, 0.24), CFrame.new(0, 3.98, -0.6), look.HairColor or WHITE)
 		add(model, "BeardTip", Vector3.new(0.46, 0.3, 0.22), CFrame.new(0, 3.48, -0.6), look.HairColor or WHITE)
 	end
+	if look.Scar then
+		feature(model, "Scar", 0.45, 0.04, 0, -0.06, -12, look.Skin:Lerp(MOUTH, 0.35), nil, 0.02)
+	end
 	if look.Mustache then
 		feature(model, "Mustache", 0.6, 0.12, 0, -0.14, 0, look.HairColor or DARK, nil, 0.02)
 	end
@@ -929,8 +1045,8 @@ local function buildCharacter(unitName, look)
 	if look.Quiver then
 		add(model, "Quiver", Vector3.new(0.5, 1.5, 0.5), CFrame.new(0.45, 3.3, 0.75) * CFrame.Angles(0, 0, R(-20)), WOOD)
 	end
-	if look.Scarf then addScarf(model, look.Scarf) end
-	if look.Cape then addCape(model, look.Cape) end
+	if look.Scarf then addScarf(model, look.Scarf, look.Face ~= "Masked") end
+	if look.Cape then addCape(model, look.Cape, look.Tattered) end
 	if look.Wings then addWings(model, look.Wings) end
 	if look.Tails then addTails(model, look.Tails, look.HairColor or WHITE, look.Accent or WHITE) end
 	if look.Aura then addAura(model, root, look.Aura) end
@@ -993,25 +1109,25 @@ local HELD = {
 	DaggerHandle = true, DaggerBlade = true, Pole = true, Tip = true, Pennant = true, TipGlow = true,
 	Staff = true, StaffCap = true, Orb = true, Shield = true, ShieldRim = true, Emblem = true,
 	BowGrip = true, BowLimb = true, BowString = true, Coin = true, Coins = true, Sack = true, SackTie = true,
-	FanBlade = true, Charm = true, CharmBead = true,
+	FanBlade = true, Charm = true, CharmBead = true, Pommel = true, SwordTail = true,
 	Sleeve = true, Cuff = true, Gauntlet = true, Shoulder = true,
 }
 
 -- Parts that turn with a staff, bow or lance on its Grip joint (see UnitModels.Rig)
 local GRIPPED = {
 	StaffCap = true, Orb = true, BowLimb = true, BowString = true, Tip = true, Pennant = true, TipGlow = true,
-	Guard = true, Blade = true, Edge = true, -- (a sword, for units in SWORD_GRIP)
+	Guard = true, Blade = true, Edge = true, Pommel = true, SwordTail = true, -- (a sword, for units in SWORD_GRIP)
 }
 
 -- Parts that move with the leg on their side
-local LEG_HELD = { Shoe = true, Greave = true }
+local LEG_HELD = { Shoe = true, Greave = true, Knee = true, BootCuff = true }
 
 -- Units whose sword turns in the hand on a Grip joint too, like a staff, so their attack can
 -- swing the blade round (the Eclipse Emperor chops down at the enemy with it)
 local SWORD_GRIP = { ["Eclipse Emperor"] = true }
 
 local ATTACK_STYLES = {
-	Sword = "Slash", Katana = "Slash", SwordShield = "Slash", Daggers = "DualSlash",
+	Sword = "Slash", Katana = "Slash", SwordShield = "Slash", Greatsword = "Slash", Daggers = "DualSlash",
 	Lance = "Thrust", Staff = "Cast", Bow = "Shoot", CoinBag = "Farm", LuckyFan = "Farm",
 }
 
